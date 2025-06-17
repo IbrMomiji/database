@@ -1,29 +1,14 @@
 <?php
-// =================================================================
-// 認証・アカウント管理クラス (Auth.php)
-//
-// - ユーザー登録、ログイン、ログアウト
-// - アカウント削除
-// - セッション管理
-// - 初期状態の取得
-// =================================================================
-
 class Auth
 {
     private $db;
+    const MAX_STORAGE_BYTES = 100 * 1024 * 1024; // 100MB
 
     public function __construct()
     {
-        // データベース接続を取得
         $this->db = Database::getInstance()->getConnection();
     }
 
-    /**
-     * ユーザーをログインさせる
-     * @param string $username
-     * @param string $password
-     * @return array 処理結果
-     */
     public function login($username, $password)
     {
         $stmt = $this->db->prepare("SELECT * FROM users WHERE username = ?");
@@ -38,12 +23,6 @@ class Auth
         }
     }
 
-    /**
-     * 新規ユーザーを登録する
-     * @param string $username
-     * @param string $password
-     * @return array 処理結果
-     */
     public function register($username, $password)
     {
         if (preg_match('/[\\\\\/:\*\?"<>|.]/', $username) || $username === '..') {
@@ -62,7 +41,6 @@ class Auth
             $stmt = $this->db->prepare("INSERT INTO users (username, password) VALUES (?, ?)");
             $stmt->execute([$username, $hashedPassword]);
 
-            // ユーザーディレクトリ作成
             $userSpecificDir = USER_DIR_PATH . '/' . $username;
             if (!is_dir(USER_DIR_PATH)) mkdir(USER_DIR_PATH, 0775, true);
             if (!is_writable(USER_DIR_PATH)) throw new Exception("'user' ディレクトリに書き込み権限がありません。");
@@ -77,29 +55,17 @@ class Auth
         }
     }
     
-    /**
-     * ユーザーをログアウトさせる
-     * @return string メッセージ
-     */
     public function logout()
     {
         if (isset($_SESSION['user_id'])) {
-            unset($_SESSION['user_id']);
-            unset($_SESSION['username']);
-            // 対話状態もリセット
-            if (isset($_SESSION['interaction_state'])) {
-                unset($_SESSION['interaction_state']);
-            }
+            session_unset();
+            session_destroy();
             return "ログアウトしました。";
         } else {
             return "ログインしていません。";
         }
     }
 
-    /**
-     * 現在のユーザーを削除する
-     * @return array 処理結果
-     */
     public function deleteAccount()
     {
         if (!isset($_SESSION['user_id'])) {
@@ -112,17 +78,15 @@ class Auth
 
         $this->db->beginTransaction();
         try {
-            // DBからユーザー削除
             $stmt = $this->db->prepare("DELETE FROM users WHERE id = ?");
             $stmt->execute([$userId]);
             
-            // ユーザーディレクトリを再帰的に削除
             if (is_dir($userSpecificDir)) {
                 $this->deleteDirectoryRecursively($userSpecificDir);
             }
 
             $this->db->commit();
-            $this->logout(); // ログアウト処理を呼び出す
+            $this->logout();
             return ['success' => true, 'message' => "アカウントを削除しました。"];
 
         } catch (Exception $e) {
@@ -132,10 +96,83 @@ class Auth
         }
     }
 
-    /**
-     * ディレクトリを再帰的に削除するヘルパー関数
-     * @param string $dir
-     */
+    public function renameUser($newUsername)
+    {
+        if (!isset($_SESSION['user_id'])) {
+            return ['success' => false, 'message' => "エラー: ログインしていません。"];
+        }
+        if (preg_match('/[\\\\\/:\*\?"<>|.]/', $newUsername) || $newUsername === '..') {
+            return ['success' => false, 'message' => "エラー: 新しいユーザー名に無効な文字が含まれています。"];
+        }
+
+        $stmt = $this->db->prepare("SELECT id FROM users WHERE username = ?");
+        $stmt->execute([$newUsername]);
+        if ($stmt->fetch()) {
+            return ['success' => false, 'message' => "エラー: そのユーザー名は既に使用されています。"];
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $userId = $_SESSION['user_id'];
+            $oldUsername = $_SESSION['username'];
+            $oldDir = USER_DIR_PATH . '/' . $oldUsername;
+            $newDir = USER_DIR_PATH . '/' . $newUsername;
+
+            $stmt = $this->db->prepare("UPDATE users SET username = ? WHERE id = ?");
+            $stmt->execute([$newUsername, $userId]);
+
+            if (is_dir($oldDir)) {
+                rename($oldDir, $newDir);
+            }
+
+            $this->db->commit();
+            $this->logout();
+            return ['success' => true, 'message' => "ユーザー名を変更しました。再度ログインしてください。"];
+
+        } catch (Exception $e) {
+            $this->db->rollBack();
+            return ['success' => false, 'message' => "エラー: ユーザー名の変更中にエラーが発生しました。"];
+        }
+    }
+
+    public function changePassword($currentPassword, $newPassword)
+    {
+        if (!isset($_SESSION['user_id'])) {
+            return ['success' => false, 'message' => "エラー: ログインしていません。"];
+        }
+
+        $userId = $_SESSION['user_id'];
+        $stmt = $this->db->prepare("SELECT password FROM users WHERE id = ?");
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch();
+
+        if (!$user || !password_verify($currentPassword, $user['password'])) {
+            return ['success' => false, 'message' => "エラー: 現在のパスワードが間違っています。"];
+        }
+
+        $newHashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+        $stmt = $this->db->prepare("UPDATE users SET password = ? WHERE id = ?");
+        $stmt->execute([$newHashedPassword, $userId]);
+
+        return ['success' => true, 'message' => "パスワードを変更しました。"];
+    }
+
+    public function getStorageUsage()
+    {
+        if (!isset($_SESSION['username'])) {
+            return ['used' => 0, 'total' => self::MAX_STORAGE_BYTES];
+        }
+        $user_dir = USER_DIR_PATH . '/' . $_SESSION['username'];
+        $size = 0;
+        if (is_dir($user_dir)) {
+            $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($user_dir, FilesystemIterator::SKIP_DOTS));
+            foreach ($iterator as $file) {
+                $size += $file->getSize();
+            }
+        }
+        return ['used' => $size, 'total' => self::MAX_STORAGE_BYTES];
+    }
+    
     private function deleteDirectoryRecursively($dir) {
         if (!is_dir($dir)) return;
         $files = array_diff(scandir($dir), ['.','..']);
@@ -145,49 +182,38 @@ class Auth
         rmdir($dir);
     }
     
-    /**
-     * 現在のプロンプト文字列を取得する
-     * @return string プロンプト
-     */
     public function getPrompt()
     {
-        if (isset($_SESSION['interaction_state'])) {
-            return '';
+        $interactionState = $_SESSION['interaction_state'] ?? null;
+
+        if ($interactionState) {
+            if (isset($interactionState['mode']) && $interactionState['mode'] === 'account') {
+                return 'account&gt; ';
+            }
+            return ''; // 対話モード中はプロンプトなし
         }
+
         $username = $_SESSION['username'] ?? null;
         return $username ? htmlspecialchars($username, ENT_QUOTES, 'UTF-8') . '@database&gt; ' : 'database&gt; ';
     }
     
-    /**
-     * ログインしているかどうかを返す
-     * @return bool
-     */
     public function isLoggedIn()
     {
         return isset($_SESSION['user_id']);
     }
     
-    /**
-     * ログインしているユーザー名を返す
-     * @return string
-     */
     public function whoami()
     {
         return isset($_SESSION['username']) ? htmlspecialchars($_SESSION['username'], ENT_QUOTES, 'UTF-8') : 'ログインしていません。';
     }
 
-    /**
-     * ページの初期読み込み時にJavaScriptに渡す状態を取得する
-     * @return array
-     */
     public function getInitialState()
     {
-        // ページロード時にセッションがリセットされているため、historyは常に空
         $history = ['<div>データベースクライアントへようこそ。</div>', "<div>'help' と入力するとコマンドの一覧を表示します。</div>", '<div><br></div>'];
         
         return [
             'history' => $history,
-            'prompt' => 'database&gt; ', // 初期プロンプトは常にこれ
+            'prompt' => 'database&gt; ',
         ];
     }
 }
