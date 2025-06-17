@@ -414,6 +414,20 @@ class WindowManager {
     _hideSnapIndicator() {
         this.snapIndicator.style.display = 'none';
     }
+
+    // 追加: 最前面ウィンドウを返す
+    getTopWindow() {
+        let topWin = null;
+        let topZ = -Infinity;
+        for (const win of this.windows.values()) {
+            const z = parseInt(win.el.style.zIndex || 0, 10);
+            if (z > topZ) {
+                topWin = win;
+                topZ = z;
+            }
+        }
+        return topWin;
+    }
 }
 
 export default WindowManager;
