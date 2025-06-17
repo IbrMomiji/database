@@ -1,0 +1,351 @@
+:root {
+    --bg-color: #202020;
+    --bg-secondary-color: #2b2b2b;
+    --bg-tertiary-color: #333333;
+    --text-color: #f0f0f0;
+    --text-secondary-color: #cccccc;
+    --border-color: #404040;
+    --accent-color: #0d63be;
+    --hover-bg: #3a3a3a;
+    --selection-bg: #00457e;
+}
+
+html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: 'Yu Gothic UI', 'Segoe UI', Meiryo, system-ui, sans-serif;
+    font-size: 14px;
+    background: var(--bg-color);
+    color: var(--text-color);
+}
+
+.explorer-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.header {
+    background: var(--bg-secondary-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.toolbar {
+    display: flex;
+    gap: 24px;
+    padding: 8px 12px;
+}
+
+.ribbon-group {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+}
+
+.ribbon-buttons {
+    display: flex;
+    gap: 4px;
+}
+
+.ribbon-group .group-label {
+    font-size: 12px;
+    color: var(--text-secondary-color);
+}
+
+.toolbar button {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-color);
+    padding: 4px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    width: 70px;
+}
+
+.toolbar button:hover {
+    background: var(--hover-bg);
+    border-color: var(--border-color);
+}
+
+.toolbar button:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+}
+
+.toolbar .icon {
+    width: 24px;
+    height: 24px;
+}
+
+.toolbar .label {
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.address-bar-container {
+    display: flex;
+    padding: 4px 12px;
+    align-items: center;
+    gap: 4px;
+}
+
+.address-bar-nav button {
+    background: none;
+    border: 1px solid transparent;
+    color: var(--text-color);
+    padding: 4px;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.address-bar-nav button:not(:disabled):hover {
+    background: var(--hover-bg);
+}
+
+.address-bar-nav button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.address-bar {
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 2px 4px;
+    cursor: text;
+}
+
+.address-bar-part {
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 4px;
+    white-space: nowrap;
+    color: var(--text-secondary-color);
+}
+
+.address-bar-part:hover {
+    background: var(--hover-bg);
+}
+
+.address-bar-separator {
+    color: var(--text-secondary-color);
+    padding: 0 4px;
+    user-select: none;
+}
+
+.address-input {
+    flex-grow: 1;
+    background: #3c3c3c;
+    border: 1px solid var(--accent-color);
+    color: var(--text-color);
+    padding: 6px 10px;
+    outline: none;
+    border-radius: 4px;
+    font: inherit;
+}
+
+.search-box {
+    background: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 4px;
+    padding: 6px 10px;
+    width: 200px;
+    font: inherit;
+}
+
+.main-content {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+.nav-pane {
+    width: 240px;
+    background: var(--bg-secondary-color);
+    border-right: 1px solid var(--border-color);
+    padding: 8px;
+    overflow-y: auto;
+    flex-shrink: 0;
+}
+
+.nav-item {
+    padding: 6px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+}
+
+.nav-item:hover, .nav-item.selected {
+    background: var(--hover-bg);
+}
+
+.nav-item .icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.file-view {
+    flex: 1;
+    overflow: auto;
+}
+
+.file-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.file-table th {
+    background: var(--bg-secondary-color);
+    padding: 8px 16px;
+    text-align: left;
+    font-weight: normal;
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    color: var(--text-secondary-color);
+    user-select: none;
+}
+
+.file-table td {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: default;
+    user-select: none;
+}
+
+.file-table tr.search-result .path {
+    font-size: 12px;
+    color: var(--text-secondary-color);
+    padding-left: 28px; /* アイコンの分インデント */
+}
+
+.file-table tr:hover {
+    background: var(--hover-bg);
+}
+
+.file-table tr.selected {
+    background: var(--selection-bg) !important;
+    color: white;
+}
+.file-table tr.selected .path {
+    color: #ccc;
+}
+.item-name-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.item-name-container input {
+    background: var(--bg-tertiary-color);
+    color: var(--text-color);
+    border: 1px solid var(--accent-color);
+    padding: 4px;
+    border-radius: 4px;
+    outline: none;
+    flex-grow: 1;
+    font: inherit;
+}
+.file-table .icon {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+.status-bar {
+    padding: 4px 12px;
+    background: var(--bg-secondary-color);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+.usage-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.usage-bar {
+    width: 150px;
+    height: 14px;
+    background: var(--bg-tertiary-color);
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+.usage-fill {
+    height: 100%;
+    background: var(--accent-color);
+    width: 0%;
+    transition: width 0.5s ease;
+}
+#drag-drop-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0,0,0,0.6);
+    border: 2px dashed var(--accent-color);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    font-size: 24px;
+    color: var(--text-color);
+    z-index: 9999;
+    pointer-events: none;
+}
+#drag-drop-overlay.visible {
+    display: flex;
+}
+.context-menu {
+    position: absolute;
+    z-index: 1000;
+    background: #2c2c2c;
+    border: 1px solid #555;
+    min-width: 240px;
+    padding: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    border-radius: 0; /* Windows風に角をなくす */
+}
+.context-menu-item {
+    padding: 8px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    user-select: none;
+}
+.context-menu-item:hover {
+    background: var(--hover-bg);
+}
+.context-menu-item .icon {
+    width: 16px;
+    height: 16px;
+    fill: var(--text-color);
+}
+.context-menu-separator {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}

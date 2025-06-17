@@ -1,8 +1,4 @@
 <?php
-ini_set('upload_max_filesize', '512M');
-ini_set('post_max_size', '512M');
-ini_set('max_execution_time', 300);
-
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
@@ -261,10 +257,13 @@ if (isset($_GET['action'])) {
         #drag-drop-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); border: 2px dashed var(--accent-color); display: none; justify-content: center; align-items: center; font-size: 24px; color: var(--text-color); z-index: 9999; pointer-events: none; }
         #drag-drop-overlay.visible { display: flex; }
         .context-menu { position: absolute; z-index: 1000; background: #2c2c2c; border: 1px solid #555; min-width: 240px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 0; }
-        .context-menu-item { padding: 8px 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 12px; }
+        .context-menu-item { padding: 8px 12px; cursor: pointer; white-space: nowrap; display: flex; align-items: center; gap: 12px; position: relative; }
         .context-menu-item:hover { background: var(--hover-bg); }
         .context-menu-item .icon { width: 16px; height: 16px; fill: var(--text-color); }
         .context-menu-separator { height: 1px; background: var(--border-color); margin: 4px 0; }
+        .context-menu-item.has-submenu::after { content: '▶'; position: absolute; right: 8px; color: var(--text-secondary-color); }
+        .submenu { display: none; position: absolute; left: 100%; top: -5px; background: #2c2c2c; border: 1px solid #555; min-width: 150px; padding: 4px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); border-radius: 0; z-index: 1001; }
+        .context-menu-item:hover > .submenu { display: block; }
     </style>
 </head>
 <body>
@@ -471,29 +470,65 @@ if (isset($_GET['action'])) {
             hideContextMenu();
             contextMenu = document.createElement('div');
             contextMenu.className = 'context-menu';
-            contextMenu.style.left = `${e.pageX}px`; contextMenu.style.top = `${e.pageY}px`;
-            const iconOpen = `<span class="icon">${fileInfo.is_dir ? ICONS['context-open'] : ICONS['context-download']}</span>`;
-            let menuItems = `<div class="context-menu-item" data-action="open">${iconOpen}<span>${fileInfo.is_dir ? '開く' : 'ダウンロード'}</span></div>`;
-            menuItems += `<div class="context-menu-separator"></div>
+            contextMenu.style.left = `${e.pageX}px`;
+            contextMenu.style.top = `${e.pageY}px`;
+
+            let menuItemsHTML = '';
+            const openActionText = fileInfo.is_dir ? '開く' : 'ダウンロード';
+            const openIcon = fileInfo.is_dir ? ICONS['context-open'] : ICONS['context-download'];
+            menuItemsHTML += `<div class="context-menu-item" data-action="open"><span class="icon">${openIcon}</span><span>${openActionText}</span></div>`;
+
+            if (!fileInfo.is_dir) {
+                menuItemsHTML += `
+                    <div class="context-menu-item has-submenu">
+                        <span>アプリで開く</span>
+                        <div class="submenu">
+                            <div class="context-menu-item" data-action="open-with-notepad">
+                                <span>Notepad</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            menuItemsHTML += `<div class="context-menu-separator"></div>
                           <div class="context-menu-item" data-action="delete"><span class="icon">${ICONS.delete}</span><span>削除</span></div>
                           <div class="context-menu-item" data-action="rename"><span class="icon">${ICONS.rename}</span><span>名前の変更</span></div>`;
-            contextMenu.innerHTML = menuItems;
+
+            contextMenu.innerHTML = menuItemsHTML;
             document.body.appendChild(contextMenu);
+
             contextMenu.addEventListener('click', ev => {
                 const item = ev.target.closest('.context-menu-item');
-                if (item) handleContextMenuAction(item.dataset.action, fileInfo, element);
+                if (item) {
+                    ev.stopPropagation();
+                    handleContextMenuAction(item.dataset.action, fileInfo, element);
+                }
             });
         };
+        
         const hideContextMenu = () => contextMenu && contextMenu.remove();
 
         const handleContextMenuAction = (action, fileInfo, element) => {
             hideContextMenu();
             const itemPath = element.dataset.path;
             switch (action) {
-                case 'open': fileInfo.is_dir ? navigateTo(itemPath) : downloadFile(itemPath); break;
-                case 'download': downloadFile(itemPath); break;
-                case 'rename': initiateRename(element); break;
-                case 'delete': deleteItems(); break;
+                case 'open':
+                    fileInfo.is_dir ? navigateTo(itemPath) : downloadFile(itemPath);
+                    break;
+                case 'open-with-notepad':
+                    window.parent.postMessage({
+                        type: 'openWithApp',
+                        app: 'notepad',
+                        filePath: itemPath
+                    }, '*');
+                    break;
+                case 'rename':
+                    initiateRename(element);
+                    break;
+                case 'delete':
+                    deleteItems();
+                    break;
             }
         };
         
