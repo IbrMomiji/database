@@ -1,37 +1,43 @@
 <?php
-// system/commands/login/account/PasswdCommand.php
-
 class PasswdCommand implements ICommand
 {
     public function execute(array $args, Auth $auth, &$interactionState): array
     {
-        // 対話モードの各ステップを処理
+        if (isset($args['c']) && isset($args['n']) && isset($args['f'])) {
+            if ($args['n'] !== $args['f']) {
+                return ['output' => "エラー: 新しいパスワードが一致しません。", 'clear' => false];
+            }
+            $result = $auth->changePassword($args['c'], $args['n']);
+            return ['output' => $result['message'], 'clear' => false];
+        }
+
         $step = $interactionState['step'] ?? 'start';
         $input = $args['input'] ?? null;
 
         switch ($step) {
             case 'start':
-                $interactionState['step'] = 'get_current_password';
+                $interactionState['type'] = 'passwd';
+                $interactionState['step'] = 'get_current';
                 return ['output' => "現在のパスワードを入力してください:", 'input_type' => 'password', 'interactive_final' => true];
 
-            case 'get_current_password':
+            case 'get_current':
                 $interactionState['current_password'] = $input;
-                $interactionState['step'] = 'get_new_password';
+                $interactionState['step'] = 'get_new';
                 return ['output' => "新しいパスワードを入力してください:", 'input_type' => 'password', 'interactive_final' => true];
 
-            case 'get_new_password':
+            case 'get_new':
                 $interactionState['new_password'] = $input;
-                $interactionState['step'] = 'confirm_new_password';
+                $interactionState['step'] = 'confirm_new';
                 return ['output' => "新しいパスワードをもう一度入力してください:", 'input_type' => 'password', 'interactive_final' => true];
 
-            case 'confirm_new_password':
+            case 'confirm_new':
                 if ($interactionState['new_password'] !== $input) {
-                    $interactionState = ['mode' => 'account']; // 最初からやり直し
+                    $interactionState = ['mode' => 'account'];
                     return ['output' => "新しいパスワードが一致しません。やり直してください。", 'clear' => false];
                 }
                 
                 $result = $auth->changePassword($interactionState['current_password'], $interactionState['new_password']);
-                $interactionState = ['mode' => 'account']; // モードをリセット
+                $interactionState = ['mode' => 'account'];
                 return ['output' => $result['message'], 'clear' => false];
         }
         
@@ -40,7 +46,7 @@ class PasswdCommand implements ICommand
 
     public function getArgumentDefinition(): array
     {
-        return [];
+        return ['c', 'n', 'f'];
     }
     public function getDescription(): string
     {
@@ -48,6 +54,6 @@ class PasswdCommand implements ICommand
     }
     public function getUsage(): string
     {
-        return "usage: passwd\n\n説明:\n  対話形式で現在のパスワードと新しいパスワードを確認し、ログインパスワードを変更します。";
+        return "usage: passwd [-c 現在のパスワード] [-n 新パスワード] [-f 確認用パスワード]\n\n説明:\n  ログインパスワードを変更します。引数を省略した場合は対話形式で尋ねられます。";
     }
 }

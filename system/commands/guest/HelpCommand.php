@@ -11,7 +11,7 @@ class HelpCommand implements ICommand
             if ($commandInstance) {
                 $output = nl2br(htmlspecialchars($commandInstance->getUsage(), ENT_QUOTES, 'UTF-8'));
             } else {
-                $output = "コマンド '" . htmlspecialchars($targetCommandName, ENT_QUOTES, 'UTF-8') . "' は見つかりません。";
+                $output = "コマンド '" . htmlspecialchars($targetCommandName, ENT_QUOTES, 'UTF-8') . "' は現在のモードでは利用できません。";
             }
         } else {
             $title = ($mode === 'account') ? "アカウント管理コマンド:" : "利用可能なコマンド:";
@@ -67,9 +67,8 @@ class HelpCommand implements ICommand
 
             foreach ($files as $file) {
                 $className = basename($file, '.php');
-                if ($mode === 'main' && $className === 'AccountCommand') {
-                    continue; 
-                }
+                if ($className === 'AccountCommand') continue;
+                
                 if (class_exists($className)) {
                     $instance = new $className();
                     if ($instance instanceof ICommand) {
@@ -80,35 +79,26 @@ class HelpCommand implements ICommand
             }
         }
 
-        if (!isset($commands['help'])) {
-             $commands['help'] = new HelpCommand();
-        }
-
+        $commands['help'] = $this;
         return $commands;
     }
 
     private function findCommandInPaths(string $commandName, bool $isLoggedIn, string $mode): ?ICommand
     {
         $className = ucfirst($commandName) . 'Command';
-        
-        $paths_to_check = [];
+        if (!class_exists($className, true)) return null;
+
+        $instance = new $className();
+
+        $guest_file = __DIR__ . '/' . $className . '.php';
+        if (file_exists($guest_file)) return $instance;
+
         if ($isLoggedIn) {
-             if ($mode === 'account' || $commandName === 'help') {
-                $paths_to_check[] = __DIR__ . '/../login/account/' . $className . '.php';
-             }
-             $paths_to_check[] = __DIR__ . '/../login/' . $className . '.php';
-        }
-        $paths_to_check[] = __DIR__ . '/' . $className . '.php';
-        
-        foreach (array_unique($paths_to_check) as $path) {
-            if (file_exists($path)) {
-                if (class_exists($className, true)) {
-                    $instance = new $className();
-                    if ($instance instanceof ICommand) {
-                        return $instance;
-                    }
-                }
-            }
+            $account_file = __DIR__ . '/../login/account/' . $className . '.php';
+            if (file_exists($account_file)) return $instance;
+            
+            $login_file = __DIR__ . '/../login/' . $className . '.php';
+            if (file_exists($login_file)) return $instance;
         }
         return null;
     }

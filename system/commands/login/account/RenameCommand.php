@@ -1,23 +1,27 @@
 <?php
-// system/commands/login/account/RenameCommand.php
-
 class RenameCommand implements ICommand
 {
     public function execute(array $args, Auth $auth, &$interactionState): array
     {
-        $newName = $args['n'] ?? null;
-        if (!$newName) {
-            return ['output' => "エラー: 新しいユーザー名を -n オプションで指定してください。", 'clear' => false];
+        if (isset($args['n'])) {
+            $result = $auth->renameUser($args['n']);
+            if ($result['success']) {
+                $interactionState = null;
+            }
+            return ['output' => $result['message'], 'clear' => false];
         }
 
-        $result = $auth->renameUser($newName);
+        if (isset($args['input'])) {
+            $result = $auth->renameUser($args['input']);
+            if ($result['success']) {
+                $interactionState = null;
+            }
+            return ['output' => $result['message'], 'clear' => false];
+        }
         
-        // 名前の変更が成功した場合、アカウントモードを終了する
-        if ($result['success']) {
-            $interactionState = null;
-        }
-
-        return ['output' => $result['message'], 'clear' => false];
+        $interactionState['type'] = 'rename';
+        $interactionState['step'] = 'get_new_name';
+        return ['output' => '新しいユーザー名を入力してください:', 'interactive_final' => true];
     }
 
     public function getArgumentDefinition(): array
@@ -30,6 +34,6 @@ class RenameCommand implements ICommand
     }
     public function getUsage(): string
     {
-        return "usage: rename -n <新しいユーザー名>\n\n説明:\n  現在のユーザー名を指定された新しい名前に変更します。変更が成功すると、自動的にログアウトします。";
+        return "usage: rename [-n <新しいユーザー名>]\n\n説明:\n  現在のユーザー名を変更します。引数を省略した場合は対話形式で尋ねられます。変更が成功すると自動的にログアウトします。";
     }
 }

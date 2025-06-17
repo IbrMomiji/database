@@ -14,31 +14,29 @@ class CommandHandler
     {
         if ($this->interactionState) {
             return $this->handleInteraction($input);
-        } else {
-            return $this->handleNewCommand($input);
         }
+        return $this->handleNewCommand($input, 'main');
     }
 
-    private function handleNewCommand(string $input): array
+    private function handleNewCommand(string $input, string $mode): array
     {
         $parts = preg_split('/\s+/', trim($input), 2);
         $commandName = strtolower($parts[0] ?? '');
         $argString = $parts[1] ?? '';
-        $currentMode = 'main';
-
+        
         if ($commandName === '') {
             return ['output' => '', 'prompt' => $this->auth->getPrompt(), 'clear' => false];
         }
 
-        $commandInstance = $this->findCommand($commandName, $currentMode);
+        $commandInstance = $this->findCommand($commandName, $mode);
 
         if ($commandInstance === null) {
             return $this->commandNotFoundResponse($commandName);
         }
         
-        $args = ($commandName === 'help') ? ['target' => trim($argString)] : $this->parseArgs($argString);
+        $args = ($commandName === 'help') ? ['target' => trim($argString), 'mode' => $mode] : $this->parseArgs($argString);
         
-        if ($commandName !== 'help' && !$this->checkInvalidArgs($commandName, $args, $commandInstance->getArgumentDefinition())) {
+        if ($commandName !== 'help' && !$this->checkInvalidArgs($args, $commandInstance->getArgumentDefinition())) {
              return $this->invalidArgsResponse($commandName);
         }
 
@@ -54,39 +52,19 @@ class CommandHandler
         $currentMode = $this->interactionState['mode'] ?? 'main';
         $interactionType = $this->interactionState['type'] ?? null;
         
-        $parts = preg_split('/\s+/', trim($input), 2);
-        $commandName = strtolower($parts[0] ?? '');
-        $argString = $parts[1] ?? '';
-
-        if ($currentMode === 'account') {
-            $commandInstance = $this->findCommand($commandName, 'account');
-            
-            if ($commandInstance) {
-                if ($commandName === 'passwd') {
-                     $this->interactionState['type'] = 'passwd'; 
-                     $this->interactionState['step'] = 'start';
-                     return $commandInstance->execute([], $this->auth, $this->interactionState);
-                }
-
-                $args = ($commandName === 'help') ? ['target' => trim($argString), 'mode' => 'account'] : $this->parseArgs($argString);
-                
-                if ($commandName !== 'help' && !$this->checkInvalidArgs($commandName, $args, $commandInstance->getArgumentDefinition())) {
-                    return $this->invalidArgsResponse($commandName);
-                }
-
-                $response = $commandInstance->execute($args, $this->auth, $this->interactionState);
-            } else {
-                 $response = $this->commandNotFoundResponse($commandName);
-            }
-        } else if ($interactionType) {
-            $commandInstance = $this->findCommand($interactionType, 'main');
+        if ($interactionType) {
+            $commandInstance = $this->findCommand($interactionType, $currentMode);
             if ($commandInstance) {
                 $response = $commandInstance->execute(['input' => $input], $this->auth, $this->interactionState);
             } else {
-                $response = ['output' => '対話セッションでエラーが発生しました。', 'clear' => false];
+                $response = ['output' => '対話セッションで致命的なエラーが発生しました。', 'clear' => false];
                 $this->interactionState = null;
             }
-        } else {
+        } 
+        else if ($currentMode === 'account') {
+            return $this->handleNewCommand($input, 'account');
+        } 
+        else {
              $response = ['output' => '不明な対話状態です。', 'clear' => false];
              $this->interactionState = null;
         }
@@ -99,36 +77,28 @@ class CommandHandler
     private function findCommand(string $commandName, string $mode): ?ICommand
     {
         $className = ucfirst($commandName) . 'Command';
-        $isLoggedIn = $this->auth->isLoggedIn();
+        
+        if (!class_exists($className, true)) {
+            return null;
+        }
 
-        $paths = [];
-        if ($mode === 'account' && $isLoggedIn) {
-            $paths[] = __DIR__ . '/commands/login/account/' . $className . '.php';
+        $instance = new $className();
+        
+        $guest_file = __DIR__ . '/commands/guest/' . $className . '.php';
+        $login_file = __DIR__ . '/commands/login/' . $className . '.php';
+        $account_file = __DIR__ . '/commands/login/account/' . $className . '.php';
+
+        if ($mode === 'account') {
+            if (file_exists($account_file)) return $instance;
+            // accountモードでもhelpは使えるようにする
+            if ($commandName === 'help' && file_exists($guest_file)) return $instance;
+            return null;
         }
         
-        // helpは常に全パスから検索可能にする
-        if ($commandName === 'help') {
-             $paths[] = __DIR__ . '/commands/guest/' . $className . '.php';
-        }
-        
-        if ($mode === 'main') {
-            if ($isLoggedIn) {
-                $paths[] = __DIR__ . '/commands/login/' . $className . '.php';
-            }
-            $paths[] = __DIR__ . '/commands/guest/' . $className . '.php';
-        }
-        
-        foreach (array_unique($paths) as $path) {
-            if (file_exists($path)) {
-                if (class_exists($className, true)) {
-                    $instance = new $className();
-                    if ($instance instanceof ICommand) {
-                        return $instance;
-                    }
-                }
-            }
-        }
-        
+        // mainモードの場合
+        if (file_exists($guest_file)) return $instance;
+        if ($this->auth->isLoggedIn() && file_exists($login_file)) return $instance;
+
         return null;
     }
     
@@ -147,7 +117,7 @@ class CommandHandler
         return $args;
     }
 
-    private function checkInvalidArgs(string $commandName, array $args, array $validArgs): bool {
+    private function checkInvalidArgs(array $args, array $validArgs): bool {
         foreach (array_keys($args) as $arg) {
             if (!in_array($arg, $validArgs)) {
                 return false;
@@ -157,17 +127,10 @@ class CommandHandler
     }
 
     private function commandNotFoundResponse(string $commandName): array {
-        return [
-            'output' => "コマンドが見つかりません: " . htmlspecialchars($commandName, ENT_QUOTES, 'UTF-8'),
-            'prompt' => $this->auth->getPrompt(),
-            'clear' => false
-        ];
+        return ['output' => "コマンドが見つかりません: " . htmlspecialchars($commandName, ENT_QUOTES, 'UTF-8')];
     }
+
     private function invalidArgsResponse(string $commandName): array {
-        return [
-            'output' => "エラー: '" . htmlspecialchars($commandName, ENT_QUOTES, 'UTF-8') . "' コマンドに不明な引数があります。",
-            'prompt' => $this->auth->getPrompt(),
-            'clear' => false
-        ];
+        return ['output' => "エラー: '" . htmlspecialchars($commandName, ENT_QUOTES, 'UTF-8') . "' コマンドに不明な引数があります。"];
     }
 }
