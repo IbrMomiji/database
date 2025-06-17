@@ -70,8 +70,8 @@ class WindowManager {
     _setupMessageListener() {
         window.addEventListener('message', (event) => {
             try {
-                const { type, sourceWindowId, mode, currentPath, filePath, app } = event.data;
-    
+                const { type, sourceWindowId, mode, currentPath, filePath, app, windowId } = event.data;
+
                 if (type === 'openWithApp') {
                     if (app) {
                         this.createWindow(app, { filePath: filePath });
@@ -92,6 +92,12 @@ class WindowManager {
                     if (sourceIframe) {
                         sourceIframe.contentWindow.postMessage({ type, filePath, mode, sourceWindowId }, '*');
                     }
+                }
+                // Notepadなど子ウィンドウからの「ウィンドウを閉じて」メッセージ
+                else if (type === 'closeChildWindow' && windowId) {
+                    // iframeのnameが "notepad-iframe-3" の場合、親ウィンドウIDは "window-3"
+                    let parentWinId = windowId.replace(/^.*-iframe-/, 'window-');
+                    this.closeWindow(parentWinId);
                 }
             } catch (error) {
                 alert(`ウィンドウ操作中にエラーが発生しました:\n${error.message}`);

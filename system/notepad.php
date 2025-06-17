@@ -5,6 +5,8 @@ if (session_status() == PHP_SESSION_NONE) {
 }
 
 define('NOTEPAD_USER_BASE_DIR', __DIR__ . '/../user');
+
+// 認証チェック
 if (!isset($_SESSION['username'])) {
     http_response_code(403); die('Authentication required.');
 }
@@ -20,7 +22,7 @@ function getSafePath_Notepad($baseDir, $path) {
         return false;
     }
 
-    $userPath = str_replace('\\', '/', $path);
+    $userPath = str_replace('\\\\', '/', $path);
 
     if (strpos($userPath, '..') !== false || preg_match('/[:*?"<>|]/', $userPath)) {
         return false;
@@ -51,6 +53,7 @@ function getSafePath_Notepad($baseDir, $path) {
     return $canonicalPath;
 }
 
+// アクションAPI
 if (isset($_GET['action'])) {
     header('Content-Type: application/json; charset=utf-8');
     $action = $_GET['action'];
@@ -60,8 +63,14 @@ if (isset($_GET['action'])) {
         if ($safe_path === false) { throw new Exception('Invalid file path.'); }
         switch ($action) {
             case 'get_content':
-                if (!is_file($safe_path) || !is_readable($safe_path)) { throw new Exception('Cannot read file.'); }
-                $content = file_get_contents($safe_path);
+                if (!is_file($safe_path) || !is_readable($safe_path)) { 
+                    throw new Exception('Cannot read file: ' . htmlspecialchars($path));
+                }
+                $content = @file_get_contents($safe_path);
+                if ($content === false) {
+                    $error = error_get_last();
+                    throw new Exception('Failed to read file. ' . ($error ? $error['message'] : ''));
+                }
                 $encoding = mb_detect_encoding($content, mb_detect_order(), true);
                 if ($encoding === false) $encoding = 'UTF-8';
                 $content_utf8 = mb_convert_encoding($content, 'UTF-8', $encoding);
@@ -70,18 +79,30 @@ if (isset($_GET['action'])) {
             case 'save_content':
                 $dir_to_save = dirname($safe_path);
                 if (!is_dir($dir_to_save)) {
-                    if (!mkdir($dir_to_save, 0775, true)) { throw new Exception('Failed to create destination directory.'); }
+                    if (!mkdir($dir_to_save, 0775, true)) {
+                        $error = error_get_last();
+                        throw new Exception('Failed to create destination directory. ' . ($error ? $error['message'] : ''));
+                    }
                 }
                 $content = $_POST['content'] ?? '';
                 $encoding = $_POST['encoding'] ?? 'UTF-8';
                 $content_encoded = mb_convert_encoding($content, $encoding, 'UTF-8');
-                if (file_put_contents($safe_path, $content_encoded) === false) { throw new Exception('Failed to save file.'); }
+                if (@file_put_contents($safe_path, $content_encoded) === false) {
+                    $error = error_get_last();
+                    throw new Exception('Failed to save file. ' . ($error ? $error['message'] : ''));
+                }
                 echo json_encode(['success' => true, 'message' => 'File saved.']);
                 break;
+            default:
+                throw new Exception('Unknown action: ' . htmlspecialchars($action));
         }
     } catch (Exception $e) {
         http_response_code(500);
-        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+        echo json_encode([
+            'success' => false,
+            'message' => $e->getMessage(),
+            'trace' => getenv('APP_DEBUG') ? $e->getTraceAsString() : null
+        ]);
     }
     exit;
 }
@@ -114,12 +135,12 @@ if (isset($_GET['action'])) {
         }
         .menu-item { padding: 4px 8px; cursor: default; position: relative; }
         .menu-item:hover, .menu-item.open { background: var(--menu-highlight-bg); border: 1px solid var(--menu-highlight-border); padding: 3px 7px; }
-        .dropdown-menu { display: none; position: absolute; top: 100%; left: 0; background: var(--bg-menu); border: 1px solid var(--border-color); box-shadow: 2px 2px 5px rgba(0,0,0,0.2); min-width: 200px; padding: 2px; z-index: 100; }
+        .dropdown-menu { display: none; position: absolute; top: 100%; left: 0; background: var(--bg-menu); border: 1px solid var(--border-color); box-shadow: 2px 2px 5px rgba(0,0,0,0.2); min-width: 120px; z-index: 10;}
         .menu-item.open .dropdown-menu { display: block; }
         .dropdown-item { padding: 4px 20px; display: flex; justify-content: space-between; align-items: center; cursor: default; }
         .dropdown-item:hover:not(.disabled) { background: var(--menu-highlight-bg); }
         .dropdown-item.disabled { color: #A0A0A0; }
-        .dropdown-item.checked::before { content: '✔'; margin-left: -16px; position: absolute; }
+        .dropdown-item.checked::before { content: '\u2714'; margin-left: -16px; position: absolute; }
         .dropdown-separator { height: 1px; background: var(--border-color); margin: 4px 1px; }
 
         .textarea-container { 
@@ -200,8 +221,8 @@ if (isset($_GET['action'])) {
     <div class="dialog-overlay" id="font-dialog">
         <div class="font-dialog">
             <div class="font-dialog-grid">
-                <div><label for="font-family">フォント:</label><input type="text" id="font-family-input" list="font-family-list"><datalist id="font-family-list"><option value="MS Gothic"><option value="Meiryo"><option value="Arial"><option value="Courier New"></datalist></div>
-                <div><label for="font-style">スタイル:</label><select id="font-style-select"><option value="normal">標準</option><option value="italic">斜体</option><option value="bold">太字</option><option value="bold italic">太字 斜体</option></select></div>
+                <div><label for="font-family">フォント:</label><input type="text" id="font-family-input" list="font-family-list"><datalist id="font-family-list"><option value="MS Gothic"></option><option value="Meiryo"></option><option value="Consolas"></option><option value="MS UI Gothic"></option><option value="Segoe UI"></option></datalist></div>
+                <div><label for="font-style">スタイル:</label><select id="font-style-select"><option value="normal">標準</option><option value="italic">斜体</option><option value="bold">太字</option><option value="bold italic">太字斜体</option></select></div>
                 <div><label for="font-size">サイズ:</label><input type="number" id="font-size-input" value="10.5" step="0.5"></div>
             </div>
             <fieldset class="font-preview"><legend>プレビュー</legend><div id="font-preview-text">AaBbYyZz</div></fieldset>
@@ -211,7 +232,6 @@ if (isset($_GET['action'])) {
             </div>
         </div>
     </div>
-    
     <script>
     document.addEventListener('DOMContentLoaded', () => {
         const getEl = id => document.getElementById(id);
@@ -225,17 +245,29 @@ if (isset($_GET['action'])) {
         let currentEncoding = 'UTF-8';
         let myWindowId = window.name;
     
+        // fetch時の詳細なエラーハンドリング付きAPI
         const api = async (action, data = {}) => {
             const formData = new FormData();
             for (const key in data) formData.append(key, data[key]);
-            const response = await fetch(`?action=${action}`, { method: 'POST', body: formData });
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({ message: 'サーバーとの通信に失敗しました。' }));
-                throw new Error(err.message);
+            let response;
+            try {
+                response = await fetch(`?action=${action}`, { method: 'POST', body: formData });
+            } catch (netErr) {
+                throw new Error('サーバーへの接続に失敗しました。');
             }
-            return response.json();
+            let result;
+            try {
+                result = await response.json();
+            } catch (parseErr) {
+                throw new Error('サーバーからの応答が不正です。');
+            }
+            if (!response.ok || !result.success) {
+                let msg = (result && result.message) ? result.message : '不明なエラー';
+                throw new Error(msg);
+            }
+            return result;
         };
-    
+
         const updateTitle = () => {
             const dirtyMarker = isDirty ? '*' : '';
             const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '無題';
@@ -245,7 +277,7 @@ if (isset($_GET['action'])) {
                 if (parentWindowEl) parentWindowEl.querySelector('.window-title').textContent = newTitle;
             } catch (e) {}
         };
-    
+
         const updateStatus = () => {
             const text = textArea.value;
             const cursorPos = textArea.selectionStart;
