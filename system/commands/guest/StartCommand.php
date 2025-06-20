@@ -7,7 +7,11 @@ class StartCommand implements ICommand
         return [
             'output' => "新しいコンソールウィンドウを開きます...",
             'clear' => false,
-            'action' => 'open_console'
+            'action' => [
+                'type' => 'open_app',
+                'app'  => 'console',
+                'options' => []
+            ]
         ];
     }
 
