@@ -57,7 +57,7 @@ $initialState = $auth->getInitialState();
     <div id="minimized-area"></div>
     <div class="snap-indicator" style="display: none;"></div>
     <div id="context-menu-container"></div>
-
+    
     <script type="text/javascript">
     //<![CDATA[
         const initialClientState = <?php echo json_encode($initialState); ?>;
@@ -66,6 +66,7 @@ $initialState = $auth->getInitialState();
     <script src="js/api.js" type="module"></script>
     <script src="js/contextMenu.js" type="module"></script>
     <script src="js/windowManager.js" type="module"></script>
+    <script src="js/windowSwitcher.js" type="module"></script>
     <script src="js/console.js" type="module"></script>
     <script src="js/main.js" type="module"></script>
 </body>

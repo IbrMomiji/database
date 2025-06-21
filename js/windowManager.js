@@ -7,6 +7,7 @@ class WindowManager {
         this.windows = new Map();
         this.windowIdCounter = 0;
         this.highestZIndex = 100;
+        this.zOrder = []; 
         this.snapIndicator = document.querySelector('.snap-indicator');
         this.minimizedArea = document.getElementById('minimized-area');
         this.activeDrag = null;
@@ -54,7 +55,6 @@ class WindowManager {
         
         newWindowEl.style.left = `${60 + this.windows.size * 30}px`;
         newWindowEl.style.top = `${60 + this.windows.size * 30}px`;
-        this.bringToFront(newWindowEl);
         
         this.container.appendChild(newWindowEl);
 
@@ -65,6 +65,23 @@ class WindowManager {
 
         this.windows.set(id, windowInstance);
         this._makeInteractive(windowInstance);
+        
+        this.focus(id);
+    }
+    
+    focus(id) {
+        this.bringToFront(id);
+        const win = this.windows.get(id);
+        if (!win) return;
+
+        if (win.controller && typeof win.controller.focus === 'function') {
+            win.controller.focus();
+        } else {
+            const iframe = win.el.querySelector('iframe');
+            if (iframe) {
+                iframe.focus();
+            }
+        }
     }
 
     _setupMessageListener() {
@@ -93,9 +110,7 @@ class WindowManager {
                         sourceIframe.contentWindow.postMessage({ type, filePath, mode, sourceWindowId }, '*');
                     }
                 }
-                // Notepadなど子ウィンドウからの「ウィンドウを閉じて」メッセージ
                 else if (type === 'closeChildWindow' && windowId) {
-                    // iframeのnameが "notepad-iframe-3" の場合、親ウィンドウIDは "window-3"
                     let parentWinId = windowId.replace(/^.*-iframe-/, 'window-');
                     this.closeWindow(parentWinId);
                 }
@@ -111,8 +126,13 @@ class WindowManager {
         if (win) {
             win.el.remove();
             this.windows.delete(id);
+            this.zOrder = this.zOrder.filter(winId => winId !== id);
         }
-        if (this.windows.size === 0 && document.querySelectorAll('.window-container').length === 0) {
+        
+        const nextWindow = this.getTopWindow();
+        if (nextWindow) {
+            this.focus(nextWindow.id);
+        } else if (this.windows.size === 0 && document.querySelectorAll('.window-container').length === 0) {
             this.createWindow('console');
         }
     }
@@ -129,8 +149,8 @@ class WindowManager {
         const onTitleBarContextMenu = (e) => {
             this._showTitleBarContextMenu(e, winInstance, {x: e.clientX, y: e.clientY});
         };
-
-        const onMouseDown = () => this.bringToFront(el);
+        
+        const onMouseDown = () => this.focus(id);
         const onTitleBarMouseDown = e => this._onDragStart(e, winInstance);
         const onTitleBarDblClick = e => {
             if (!e.target.closest('.window-controls') && !e.target.closest('.title-bar-icon')) {
@@ -163,12 +183,18 @@ class WindowManager {
 
         winData.state = 'minimized';
         winData.el.style.display = 'none';
+        this.zOrder = this.zOrder.filter(winId => winId !== id);
 
         const minimizedTab = document.createElement('div');
         minimizedTab.className = 'minimized-tab';
         minimizedTab.textContent = winData.el.querySelector('.window-title').textContent;
         minimizedTab.dataset.windowId = id;
         this.minimizedArea.appendChild(minimizedTab);
+
+        const nextWindow = this.getTopWindow();
+        if (nextWindow) {
+            this.focus(nextWindow.id);
+        }
     }
 
     restoreWindow(id) {
@@ -178,9 +204,7 @@ class WindowManager {
         if (winData && tab) {
             winData.state = 'normal';
             winData.el.style.display = '';
-            this.bringToFront(winData.el);
-            winData.controller?.focus();
-            tab.remove();
+            this.focus(id);
         }
     }
 
@@ -230,9 +254,14 @@ class WindowManager {
             if(maximizeBtn) maximizeBtn.innerHTML = '&#10065;';
         }
     }
-
-    bringToFront(el) {
-        el.style.zIndex = ++this.highestZIndex;
+    
+    bringToFront(id) {
+        const win = this.windows.get(id);
+        if (!win) return;
+        
+        win.el.style.zIndex = ++this.highestZIndex;
+        this.zOrder = this.zOrder.filter(winId => winId !== id);
+        this.zOrder.push(id);
     }
     
     _showTitleBarContextMenu(e, winInstance, coords) {
@@ -278,8 +307,7 @@ class WindowManager {
         if (e.target.closest('.window-controls') || e.target.closest('.title-bar-icon') || e.button !== 0) return;
         e.preventDefault();
         
-        const { el } = winInstance;
-        this.bringToFront(el);
+        this.focus(winInstance.id);
         
         let dragOffsetX, dragOffsetY;
 
@@ -288,13 +316,13 @@ class WindowManager {
             const newLeft = e.clientX - (prevWidth * (e.clientX / window.innerWidth));
             this.toggleMaximize(winInstance.id);
             
-            el.style.left = `${newLeft}px`;
-            el.style.top = `${e.clientY - 15}px`;
+            winInstance.el.style.left = `${newLeft}px`;
+            winInstance.el.style.top = `${e.clientY - 15}px`;
             dragOffsetX = e.clientX - newLeft;
-            dragOffsetY = e.clientY - parseFloat(el.style.top);
+            dragOffsetY = e.clientY - parseFloat(winInstance.el.style.top);
         } else {
-            dragOffsetX = e.clientX - el.offsetLeft;
-            dragOffsetY = e.clientY - el.offsetTop;
+            dragOffsetX = e.clientX - winInstance.el.offsetLeft;
+            dragOffsetY = e.clientY - winInstance.el.offsetTop;
         }
 
         this.activeDrag = {
@@ -304,7 +332,7 @@ class WindowManager {
 
     _onResizeStart(e, winInstance) {
         e.preventDefault();
-        this.bringToFront(winInstance.el);
+        this.focus(winInstance.id);
         
         if (winInstance.state !== 'normal') {
             this.toggleMaximize(winInstance.id);
@@ -349,7 +377,7 @@ class WindowManager {
                  };
             }
             
-            this.activeDrag.winInstance.controller?.focus();
+            this.focus(this.activeDrag.winInstance.id);
             
             this.activeDrag = null;
         };
@@ -421,18 +449,22 @@ class WindowManager {
         this.snapIndicator.style.display = 'none';
     }
 
-    // 追加: 最前面ウィンドウを返す
     getTopWindow() {
-        let topWin = null;
-        let topZ = -Infinity;
-        for (const win of this.windows.values()) {
-            const z = parseInt(win.el.style.zIndex || 0, 10);
-            if (z > topZ) {
-                topWin = win;
-                topZ = z;
+        if (this.zOrder.length === 0) return null;
+        const topWindowId = this.zOrder[this.zOrder.length - 1];
+        return this.windows.get(topWindowId) || null;
+    }
+
+    // --- Added: 一番手前のコンソールを探すメソッド ---
+    getTopmostConsole() {
+        for (let i = this.zOrder.length - 1; i >= 0; i--) {
+            const winId = this.zOrder[i];
+            const win = this.windows.get(winId);
+            if (win && win.type === 'console') {
+                return win;
             }
         }
-        return topWin;
+        return null;
     }
 }
 

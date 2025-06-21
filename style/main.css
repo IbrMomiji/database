@@ -1,5 +1,4 @@
 :root {
-  /* カラー変数 */
   --bg-primary: #008080;
   --titlebar-dark: #0d2a53;
   --titlebar-light: #f0f0f0;
@@ -12,15 +11,12 @@
   --border-gray: #707070;
   --hover-dark: #2a4a7a;
   --close-hover: #e81123;
-  
-  /* サイズ変数 */
   --titlebar-height: 20px;
   --resizer-size: 8px;
   --window-min-width: 350px;
   --window-min-height: 200px;
 }
 
-/* フォント定義 -------------------------- */
 @font-face {
   font-family: 'MS Gothic';
   src: local('MS Gothic'), 
@@ -28,7 +24,6 @@
        local('Osaka-mono');
 }
 
-/* ベース設定 -------------------------- */
 html, body {
   width: 100%;
   height: 100%;
@@ -42,7 +37,6 @@ body {
   font-family: 'MS Gothic', 'Osaka-mono', monospace;
 }
 
-/* ウィンドウコンテナ -------------------- */
 .window-container {
   position: absolute;
   display: flex;
@@ -52,9 +46,8 @@ body {
   border: 1px solid var(--border-gray);
   box-shadow: 2px 2px 10px rgba(0, 0, 0, 0.5);
   overflow: hidden;
-  
-  /* 特殊状態 */
-  &.maximized {
+}
+.window-container.maximized {
     top: 0 !important;
     left: 0 !important;
     width: 100vw !important;
@@ -62,28 +55,25 @@ body {
     border: none;
     box-shadow: none;
     transition: none;
-  }
-  &.snapped-left {
+}
+.window-container.snapped-left {
     top: 0 !important;
     left: 0 !important;
     width: 50vw !important;
     height: 100vh !important;
-  }
-  &.snapped-right {
+}
+.window-container.snapped-right {
     top: 0 !important;
     left: 50vw !important;
     width: 50vw !important;
     height: 100vh !important;
-  }
 }
 
-/* ウィンドウサイズバリエーション */
 .console-window { width: 700px; height: 450px; }
 .explorer-window { width: 800px; height: 550px; }
 .notepad-window { width: 750px; height: 500px; }
 .file-explorer-dialog-window { width: 580px; height: 420px; }
 
-/* 背景色バリエーション */
 .console-window { background-color: var(--console-bg); }
 .explorer-window,
 .notepad-window,
@@ -91,9 +81,7 @@ body {
   background-color: var(--titlebar-light); 
 }
 
-/* タイトルバー ------------------------ */
 .title-bar {
-  /* 基本スタイル */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -104,21 +92,17 @@ body {
   cursor: move;
   user-select: none;
   flex-shrink: 0;
-  
-  /* 特殊状態 */
-  .maximized &,
-  .snapped-left &,
-  .snapped-right & {
+}
+.maximized .title-bar,
+.snapped-left .title-bar,
+.snapped-right .title-bar {
     cursor: default;
-  }
-  
-  /* エクスプローラ専用 */
-  .explorer-window &,
-  .file-explorer-dialog-window & {
+}
+.explorer-window .title-bar,
+.file-explorer-dialog-window .title-bar {
     background-color: var(--titlebar-light);
     color: var(--text-light);
     border-bottom: 1px solid #ccc;
-  }
 }
 
 .title-bar-text {
@@ -138,7 +122,6 @@ body {
   cursor: pointer;
 }
 
-/* アイコン画像 */
 .icon-console {
   background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="%23fff"><path d="M2 2v2h12V2H2zm0 3v2h12V5H2zm0 3v2h12V8H2zm0 3v2h12v-2H2z"/></svg>');
 }
@@ -150,11 +133,10 @@ body {
   background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="%23000"><path d="M9 1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4l-4-3zm2 9H5v-1h6v1zm0-2H5V7h6v1zm-1-3V2.5L13.5 6H10z"/></svg>');
 }
 
-/* ウィンドウコントロール -------------- */
 .window-controls {
   display: flex;
-  
-  span {
+}
+.window-controls span {
     width: 26px;
     height: var(--titlebar-height);
     margin-left: 1px;
@@ -166,32 +148,28 @@ body {
     color: var(--text-dark);
     cursor: pointer;
     transition: background-color 0.15s;
-    
-    &:hover {
+}
+.window-controls span:hover {
       background-color: var(--hover-dark);
-    }
-    &.close-btn:hover {
+}
+.window-controls span.close-btn:hover {
       background-color: var(--close-hover);
       color: white;
-    }
-  }
-  
-  /* エクスプローラ専用 */
-  .explorer-window & span,
-  .file-explorer-dialog-window & span {
+}
+.explorer-window .window-controls span,
+.file-explorer-dialog-window .window-controls span {
     color: var(--text-light);
-    
-    &:hover {
+}
+.explorer-window .window-controls span:hover,
+.file-explorer-dialog-window .window-controls span:hover {
       background-color: #e0e0e0;
-    }
-    &.close-btn:hover {
+}
+.explorer-window .window-controls span.close-btn:hover,
+.file-explorer-dialog-window .window-controls span.close-btn:hover {
       background-color: var(--close-hover);
       color: white;
-    }
-  }
 }
 
-/* ウィンドウコンテンツ ---------------- */
 .window-content-frame {
   width: 100%;
   height: 100%;
@@ -200,7 +178,6 @@ body {
   background-color: #FFFFFF;
 }
 
-/* コンソール固有スタイル ---------------- */
 .console-body {
   padding: 8px;
   flex-grow: 1;
@@ -208,18 +185,16 @@ body {
   color: #c0c0c0;
   font-size: 16px;
   line-height: 1.4;
-
-  /* スクロールバー */
-  &::-webkit-scrollbar {
+}
+.console-body::-webkit-scrollbar {
     width: 16px;
-  }
-  &::-webkit-scrollbar-track {
+}
+.console-body::-webkit-scrollbar-track {
     background: var(--scrollbar-track);
-  }
-  &::-webkit-scrollbar-thumb {
+}
+.console-body::-webkit-scrollbar-thumb {
     background: var(--scrollbar-thumb);
     border: 1px solid #777;
-  }
 }
 
 .console-output > div {
@@ -229,10 +204,9 @@ body {
 
 .input-line {
   display: flex;
-  
-  &.interactive-mode .prompt {
+}
+.input-line.interactive-mode .prompt {
     display: none;
-  }
 }
 
 .prompt {
@@ -251,11 +225,9 @@ body {
   caret-color: #c0c0c0;
 }
 
-/* テキストカラー */
 .cmd { color: #4CAF50; }
 .error { color: #ff5555; }
 
-/* 最小化エリア ------------------------ */
 #minimized-area {
   position: fixed;
   bottom: 5px;
@@ -282,22 +254,19 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  
-  &:active {
+}
+.minimized-tab:active {
     border-color: #808080;
     border-right-color: #ffffff;
     border-bottom-color: #ffffff;
-  }
 }
 
-/* リサイザー -------------------------- */
 .resizer {
   position: absolute;
   background: transparent;
   z-index: 10;
 }
 
-/* 方向別スタイル */
 .top {
   top: -4px;
   left: 0;
@@ -327,7 +296,6 @@ body {
   cursor: ew-resize;
 }
 
-/* コーナーリサイザー */
 .top-left {
   top: -6px;
   left: -6px;
@@ -357,7 +325,6 @@ body {
   cursor: nwse-resize;
 }
 
-/* スナップインジケータ ---------------- */
 .snap-indicator {
   position: fixed;
   z-index: 99999;
@@ -368,7 +335,6 @@ body {
   transition: all 0.1s ease-in-out;
 }
 
-/* コンテキストメニュー ---------------- */
 #context-menu-container {
   position: fixed;
   top: 0;
@@ -387,8 +353,8 @@ body {
   padding: 4px 0;
   margin: 0;
   font-size: 14px;
-  
-  .menu-item {
+}
+.custom-context-menu .menu-item {
     padding: 6px 20px;
     cursor: pointer;
     user-select: none;
@@ -396,15 +362,107 @@ body {
     display: flex;
     justify-content: space-between;
     position: relative;
-    
-    &:hover {
+}
+.custom-context-menu .menu-item:hover {
       background-color: var(--hover-dark);
-    }
-  }
-  
-  .separator {
+}
+.custom-context-menu .separator {
     height: 1px;
     background-color: var(--border-gray);
     margin: 4px 0;
-  }
+}
+
+.window-switcher-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(20, 20, 20, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 20000;
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+}
+
+#window-switcher-list {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap; 
+    justify-content: center;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 15px;
+    list-style: none;
+    margin: 0;
+    max-width: 90vw;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: #555 #333;
+}
+
+#window-switcher-list::-webkit-scrollbar {
+    height: 6px;
+}
+#window-switcher-list::-webkit-scrollbar-track {
+    background: #333;
+    border-radius: 3px;
+}
+#window-switcher-list::-webkit-scrollbar-thumb {
+    background-color: #555;
+    border-radius: 3px;
+}
+
+.window-switcher-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    border: 2px solid transparent;
+    border-radius: 2px;
+    cursor: pointer;
+    background-color: rgba(40, 40, 40, 0.6);
+    transition: background-color 0.15s, border-color 0.15s;
+    width: 200px;
+    height: 150px;
+    padding: 8px;
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.window-switcher-item.selected {
+    background-color: rgba(80, 80, 80, 0.7);
+    border-color: #0078d4;
+}
+
+.window-switcher-item .icon {
+    width: 100%;
+    height: 100px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #333;
+    border: 1px solid #555;
+}
+
+.window-switcher-item .icon .title-bar-icon {
+    width: 48px;
+    height: 48px;
+    filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.5));
+}
+
+.window-switcher-item .title {
+    color: white;
+    font-family: 'Segoe UI', 'Meiryo', sans-serif;
+    font-size: 13px;
+    font-weight: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    text-align: center;
 }
