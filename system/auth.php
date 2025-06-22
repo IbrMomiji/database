@@ -1,60 +1,139 @@
 <?php
 class Auth
 {
+    private $pdo;
     private $db;
-    const MAX_STORAGE_BYTES = 100 * 1024 * 1024; // 100MB
 
     public function __construct()
     {
-        $this->db = Database::getInstance()->getConnection();
+        $this->db = Database::getInstance();
+        $this->pdo = $this->db->getConnection();
     }
 
-    public function login($username, $password)
+    private function validateUsername($username)
     {
-        $stmt = $this->db->prepare("SELECT * FROM users WHERE username = ?");
-        $stmt->execute([$username]);
-        $user = $stmt->fetch();
-        if ($user && password_verify($password, $user['password'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['username'] = $user['username'];
-            return ['success' => true, 'message' => "ようこそ、" . htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') . "さん！"];
-        } else {
-            return ['success' => false, 'message' => "ログイン失敗: ユーザー名またはパスワードが間違っています。"];
+        if (empty($username)) {
+            return "ユーザー名を入力してください。";
         }
+        if (strlen($username) < 3 || strlen($username) > 20) {
+            return "ユーザー名は3文字以上20文字以下で設定してください。";
+        }
+        if (!preg_match('/^[a-zA-Z0-9-]+$/', $username)) {
+            return "ユーザー名は英数字とハイフン(-)のみ使用できます。";
+        }
+        return true;
+    }
+
+    private function validatePassword($password)
+    {
+        if (empty($password)) {
+            return "パスワードを入力してください。";
+        }
+        if (strlen($password) < 8) {
+            return "パスワードは最低8文字以上で設定してください。";
+        }
+        if (!preg_match('/[A-Z]/', $password)) {
+            return "パスワードには少なくとも1つの大文字を含めてください。";
+        }
+        if (!preg_match('/[a-z]/', $password)) {
+            return "パスワードには少なくとも1つの小文字を含めてください。";
+        }
+        if (!preg_match('/[0-9]/', $password)) {
+            return "パスワードには少なくとも1つの数字を含めてください。";
+        }
+        return true;
+    }
+
+    private function generateUuid()
+    {
+        return sprintf(
+            '%04x%04x-%04x-%04x-%04x-%04x%04x%04x',
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0x0fff) | 0x4000,
+            mt_rand(0, 0x3fff) | 0x8000,
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff),
+            mt_rand(0, 0xffff)
+        );
     }
 
     public function register($username, $password)
     {
-        if (preg_match('/[\\\\\/:\*\?"<>|.]/', $username) || $username === '..') {
-            return ['success' => false, 'message' => "エラー: ユーザー名に無効な文字 (\\ / : * ? \" < > | .) が含まれています。"];
+        $usernameValidation = $this->validateUsername($username);
+        if ($usernameValidation !== true) {
+            return ['success' => false, 'message' => $usernameValidation];
         }
 
-        $stmt = $this->db->prepare("SELECT id FROM users WHERE username = ?");
-        $stmt->execute([$username]);
-        if ($stmt->fetch()) {
-            return ['success' => false, 'message' => "エラー: ユーザー名 '" . htmlspecialchars($username, ENT_QUOTES, 'UTF-8') . "' は既に使用されています。"];
+        $passwordValidation = $this->validatePassword($password);
+        if ($passwordValidation !== true) {
+            return ['success' => false, 'message' => $passwordValidation];
         }
 
-        $this->db->beginTransaction();
         try {
-            $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
-            $stmt = $this->db->prepare("INSERT INTO users (username, password) VALUES (?, ?)");
-            $stmt->execute([$username, $hashedPassword]);
+            $stmt = $this->pdo->prepare("SELECT id FROM users WHERE username = :username");
+            $stmt->execute([':username' => $username]);
+            if ($stmt->fetch()) {
+                return ['success' => false, 'message' => 'エラー: そのユーザー名は既に使用されています。'];
+            }
 
-            $userSpecificDir = USER_DIR_PATH . '/' . $username;
-            if (!is_dir(USER_DIR_PATH)) mkdir(USER_DIR_PATH, 0775, true);
-            if (!is_writable(USER_DIR_PATH)) throw new Exception("'user' ディレクトリに書き込み権限がありません。");
-            if (!is_dir($userSpecificDir)) mkdir($userSpecificDir, 0775);
+            $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+            $uuid = $this->generateUuid();
+
+            $this->pdo->beginTransaction();
+
+            $stmt = $this->pdo->prepare("INSERT INTO users (username, password, uuid) VALUES (:username, :password, :uuid)");
+            $stmt->execute([
+                ':username' => $username,
+                ':password' => $hashedPassword,
+                ':uuid'     => $uuid
+            ]);
+
+            $userDir = USER_DIR_PATH . '/' . $uuid;
+            if (!is_dir(USER_DIR_PATH)) {
+                mkdir(USER_DIR_PATH, 0775, true);
+            }
+            if (!is_writable(USER_DIR_PATH)) {
+                throw new Exception("'user' ディレクトリに書き込み権限がありません。");
+            }
             
-            $this->db->commit();
-            return ['success' => true, 'message' => "ユーザー '" . htmlspecialchars($username, ENT_QUOTES, 'UTF-8') . "' を登録しました。'login'コマンドでログインしてください。"];
+            if (!mkdir($userDir, 0775)) {
+                throw new Exception("ユーザーディレクトリの作成に失敗しました。");
+            }
+            mkdir($userDir . '/.settings', 0775, true);
+            
+            $this->pdo->commit();
+            return ['success' => true, 'message' => 'アカウントが正常に作成されました。'."'login'".'コマンドでログインしてください。'];
+
         } catch (Exception $e) {
-            $this->db->rollBack();
-            error_log("User registration failed for '$username': " . $e->getMessage());
-            return ['success' => false, 'message' => "エラー: 登録中にサーバーで問題が発生しました。"];
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            return ['success' => false, 'message' => 'エラー: ' . $e->getMessage()];
         }
     }
-    
+
+    public function login($username, $password)
+    {
+        try {
+            $stmt = $this->pdo->prepare("SELECT * FROM users WHERE username = ?");
+            $stmt->execute([$username]);
+            $user = $stmt->fetch();
+
+            if ($user && password_verify($password, $user['password'])) {
+                $_SESSION['user_id'] = $user['id'];
+                $_SESSION['username'] = $user['username'];
+                $_SESSION['user_uuid'] = $user['uuid'];
+                return ['success' => true, 'message' => "ようこそ、" . htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') . "さん！"];
+            } else {
+                return ['success' => false, 'message' => "ログイン失敗: ユーザー名またはパスワードが間違っています。"];
+            }
+        } catch (PDOException $e) {
+            return ['success' => false, 'message' => 'データベースエラーが発生しました。'];
+        }
+    }
+
     public function logout()
     {
         if (isset($_SESSION['user_id'])) {
@@ -66,72 +145,35 @@ class Auth
         }
     }
 
-    public function deleteAccount()
-    {
-        if (!isset($_SESSION['user_id'])) {
-            return ['success' => false, 'message' => "エラー: ログインしていません。"];
-        }
-
-        $userId = $_SESSION['user_id'];
-        $username = $_SESSION['username'];
-        $userSpecificDir = USER_DIR_PATH . '/' . $username;
-
-        $this->db->beginTransaction();
-        try {
-            $stmt = $this->db->prepare("DELETE FROM users WHERE id = ?");
-            $stmt->execute([$userId]);
-            
-            if (is_dir($userSpecificDir)) {
-                $this->deleteDirectoryRecursively($userSpecificDir);
-            }
-
-            $this->db->commit();
-            $this->logout();
-            return ['success' => true, 'message' => "アカウントを削除しました。"];
-
-        } catch (Exception $e) {
-            $this->db->rollBack();
-            error_log("Account deletion failed for user ID '$userId' ($username): " . $e->getMessage());
-            return ['success' => false, 'message' => "エラー: アカウント削除中にサーバーで問題が発生しました。"];
-        }
-    }
-
     public function renameUser($newUsername)
     {
         if (!isset($_SESSION['user_id'])) {
             return ['success' => false, 'message' => "エラー: ログインしていません。"];
         }
-        if (preg_match('/[\\\\\/:\*\?"<>|.]/', $newUsername) || $newUsername === '..') {
-            return ['success' => false, 'message' => "エラー: 新しいユーザー名に無効な文字が含まれています。"];
+        
+        $usernameValidation = $this->validateUsername($newUsername);
+        if ($usernameValidation !== true) {
+            return ['success' => false, 'message' => $usernameValidation];
         }
 
-        $stmt = $this->db->prepare("SELECT id FROM users WHERE username = ?");
-        $stmt->execute([$newUsername]);
-        if ($stmt->fetch()) {
-            return ['success' => false, 'message' => "エラー: そのユーザー名は既に使用されています。"];
-        }
-
-        $this->db->beginTransaction();
         try {
-            $userId = $_SESSION['user_id'];
-            $oldUsername = $_SESSION['username'];
-            $oldDir = USER_DIR_PATH . '/' . $oldUsername;
-            $newDir = USER_DIR_PATH . '/' . $newUsername;
-
-            $stmt = $this->db->prepare("UPDATE users SET username = ? WHERE id = ?");
-            $stmt->execute([$newUsername, $userId]);
-
-            if (is_dir($oldDir)) {
-                rename($oldDir, $newDir);
+            $stmt = $this->pdo->prepare("SELECT id FROM users WHERE username = :username");
+            $stmt->execute([':username' => $newUsername]);
+            if ($stmt->fetch()) {
+                return ['success' => false, 'message' => 'エラー: そのユーザー名は既に使用されています。'];
             }
 
-            $this->db->commit();
-            $this->logout();
-            return ['success' => true, 'message' => "ユーザー名を変更しました。再度ログインしてください。"];
+            $currentUsername = $_SESSION['username'];
+            $stmt = $this->pdo->prepare("UPDATE users SET username = :new_username WHERE username = :current_username");
+            $stmt->execute([
+                ':new_username' => $newUsername,
+                ':current_username' => $currentUsername
+            ]);
 
-        } catch (Exception $e) {
-            $this->db->rollBack();
-            return ['success' => false, 'message' => "エラー: ユーザー名の変更中にエラーが発生しました。"];
+            return ['success' => true, 'message' => 'ユーザー名を変更しました。新しいユーザー名: ' . $newUsername];
+
+        } catch (PDOException $e) {
+            return ['success' => false, 'message' => 'データベースエラー: ' . $e->getMessage()];
         }
     }
 
@@ -141,28 +183,95 @@ class Auth
             return ['success' => false, 'message' => "エラー: ログインしていません。"];
         }
 
-        $userId = $_SESSION['user_id'];
-        $stmt = $this->db->prepare("SELECT password FROM users WHERE id = ?");
-        $stmt->execute([$userId]);
-        $user = $stmt->fetch();
+        try {
+            $username = $_SESSION['username'];
+            $stmt = $this->pdo->prepare("SELECT password FROM users WHERE username = :username");
+            $stmt->execute([':username' => $username]);
+            $user = $stmt->fetch();
 
-        if (!$user || !password_verify($currentPassword, $user['password'])) {
-            return ['success' => false, 'message' => "エラー: 現在のパスワードが間違っています。"];
+            if (!$user || !password_verify($currentPassword, $user['password'])) {
+                return ['success' => false, 'message' => 'エラー: 現在のパスワードが間違っています。'];
+            }
+
+            $passwordValidation = $this->validatePassword($newPassword);
+            if ($passwordValidation !== true) {
+                return ['success' => false, 'message' => $passwordValidation];
+            }
+            
+            $hashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
+            $stmt = $this->pdo->prepare("UPDATE users SET password = :password WHERE username = :username");
+            $stmt->execute([
+                ':password' => $hashedPassword,
+                ':username' => $username
+            ]);
+
+            return ['success' => true, 'message' => 'パスワードが変更されました。'];
+
+        } catch (PDOException $e) {
+            return ['success' => false, 'message' => 'データベースエラー: ' . $e->getMessage()];
         }
-
-        $newHashedPassword = password_hash($newPassword, PASSWORD_DEFAULT);
-        $stmt = $this->db->prepare("UPDATE users SET password = ? WHERE id = ?");
-        $stmt->execute([$newHashedPassword, $userId]);
-
-        return ['success' => true, 'message' => "パスワードを変更しました。"];
     }
 
+    public function deleteAccount($password)
+    {
+        if (!isset($_SESSION['user_id'])) {
+            return ['success' => false, 'message' => "エラー: ログインしていません。"];
+        }
+
+        try {
+            $username = $_SESSION['username'];
+            $uuid = $_SESSION['user_uuid'];
+
+            $stmt = $this->pdo->prepare("SELECT password FROM users WHERE username = :username");
+            $stmt->execute([':username' => $username]);
+            $user = $stmt->fetch();
+
+            if (!$user || !password_verify($password, $user['password'])) {
+                return ['success' => false, 'message' => 'パスワードが間違っています。アカウントを削除できませんでした。'];
+            }
+            
+            $this->pdo->beginTransaction();
+
+            $userDir = USER_DIR_PATH . '/' . $uuid;
+            if (is_dir($userDir)) {
+                $this->recursiveDelete($userDir);
+            }
+
+            $stmt = $this->pdo->prepare("DELETE FROM users WHERE username = :username");
+            $stmt->execute([':username' => $username]);
+
+            $this->pdo->commit();
+
+            return ['success' => true, 'message' => 'アカウントを削除しました。'];
+
+        } catch (Exception $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            return ['success' => false, 'message' => 'エラー: アカウント削除中にサーバーで問題が発生しました。'];
+        }
+    }
+
+    private function recursiveDelete($dir)
+    {
+        if (!is_dir($dir)) return;
+        $files = array_diff(scandir($dir), array('.', '..'));
+        foreach ($files as $file) {
+            $path = "$dir/$file";
+            is_dir($path) ? $this->recursiveDelete($path) : unlink($path);
+        }
+        rmdir($dir);
+    }
+    
     public function getStorageUsage()
     {
-        if (!isset($_SESSION['username'])) {
-            return ['used' => 0, 'total' => self::MAX_STORAGE_BYTES];
+        $max_storage_bytes = 100 * 1024 * 1024;
+
+        if (!isset($_SESSION['user_uuid'])) {
+            return ['used' => 0, 'total' => $max_storage_bytes];
         }
-        $user_dir = USER_DIR_PATH . '/' . $_SESSION['username'];
+        
+        $user_dir = USER_DIR_PATH . '/' . $_SESSION['user_uuid'];
         $size = 0;
         if (is_dir($user_dir)) {
             $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($user_dir, FilesystemIterator::SKIP_DOTS));
@@ -170,18 +279,14 @@ class Auth
                 $size += $file->getSize();
             }
         }
-        return ['used' => $size, 'total' => self::MAX_STORAGE_BYTES];
+        return ['used' => $size, 'total' => $max_storage_bytes];
     }
-    
-    private function deleteDirectoryRecursively($dir) {
-        if (!is_dir($dir)) return;
-        $files = array_diff(scandir($dir), ['.','..']);
-        foreach ($files as $file) {
-          (is_dir("$dir/$file")) ? $this->deleteDirectoryRecursively("$dir/$file") : unlink("$dir/$file");
-        }
-        rmdir($dir);
+
+    public function isLoggedIn()
+    {
+        return isset($_SESSION['user_id']);
     }
-    
+
     public function getPrompt()
     {
         $interactionState = $_SESSION['interaction_state'] ?? null;
@@ -190,16 +295,11 @@ class Auth
             if (isset($interactionState['mode']) && $interactionState['mode'] === 'account') {
                 return 'account&gt; ';
             }
-            return ''; // 対話モード中はプロンプトなし
+            return '';
         }
 
         $username = $_SESSION['username'] ?? null;
         return $username ? htmlspecialchars($username, ENT_QUOTES, 'UTF-8') . '@database&gt; ' : 'database&gt; ';
-    }
-    
-    public function isLoggedIn()
-    {
-        return isset($_SESSION['user_id']);
     }
     
     public function whoami()

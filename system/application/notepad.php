@@ -11,14 +11,14 @@ define('NOTEPAD_USER_BASE_DIR', __DIR__ . '/../../user');
 define('SETTINGS_DIR', '.settings');
 define('NOTEPAD_SETTINGS_FILE', SETTINGS_DIR . '/.notepad.json');
 
-if (!isset($_SESSION['username'])) {
+if (!isset($_SESSION['user_id'], $_SESSION['user_uuid'])) {
     http_response_code(403);
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode(['success' => false, 'message' => 'Authentication required.']);
     exit;
 }
 $username = $_SESSION['username'];
-$user_dir = NOTEPAD_USER_BASE_DIR . '/' . $username;
+$user_dir = NOTEPAD_USER_BASE_DIR . '/' . $_SESSION['user_uuid'];
 if (!is_dir($user_dir)) {
     mkdir($user_dir, 0775, true);
 }
@@ -1020,3 +1020,5 @@ if (isset($_GET['action'])) {
     </script>
 </body>
 </html>
+
+}

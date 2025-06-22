@@ -54,6 +54,6 @@ class PasswdCommand implements ICommand
     }
     public function getUsage(): string
     {
-        return "usage: passwd [-c 現在のパスワード] [-n 新パスワード] [-f 確認用パスワード]\n\n説明:\n  ログインパスワードを変更します。引数を省略した場合は対話形式で尋ねられます。";
+        return "usage: passwd [-c 現在のパスワード] [-n 新しいパスワード] [-f 新しいパスワードの確認]";
     }
 }

@@ -6,12 +6,12 @@ if (session_status() == PHP_SESSION_NONE) {
 define('FILEDIALOG_USER_BASE_DIR', __DIR__ . '/../../user');
 define('SETTINGS_DIR', '.settings');
 
-if (!isset($_SESSION['username'])) {
+if (!isset($_SESSION['user_id'], $_SESSION['user_uuid'])) {
     http_response_code(403);
     die('Authentication required.');
 }
-$username = $_SESSION['username'];
-$user_dir = FILEDIALOG_USER_BASE_DIR . '/' . $username;
+
+$user_dir = FILEDIALOG_USER_BASE_DIR . '/' . $_SESSION['user_uuid'];
 
 function getSafePath_Dialog($baseDir, $path) {
     $path = str_replace('\\', '/', $path);
@@ -31,7 +31,7 @@ function getSafePath_Dialog($baseDir, $path) {
         $finalPath = realpath($parent) . '/' . basename($fullPath);
     }
 
-    if (strpos($finalPath, $realBaseDir) !== 0) {
+    if ($realBaseDir === false || strpos($finalPath, $realBaseDir) !== 0) {
         return false;
     }
     return rtrim($finalPath, '/');
@@ -39,109 +39,126 @@ function getSafePath_Dialog($baseDir, $path) {
 
 function deleteDirectoryRecursively_Dialog($dir) {
     if (!is_dir($dir)) return false;
-    $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
-    foreach ($files as $fileinfo) {
-        $path = $fileinfo->getRealPath();
-        if ($fileinfo->isDir()) { @rmdir($path); }
-        else { @unlink($path); }
+    try {
+        $files = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::CHILD_FIRST
+        );
+        foreach ($files as $fileinfo) {
+            $path = $fileinfo->getRealPath();
+            if ($fileinfo->isDir()) {
+                @rmdir($path);
+            } else {
+                @unlink($path);
+            }
+        }
+        return @rmdir($dir);
+    } catch(Exception $e) {
+        return false;
     }
-    return @rmdir($dir);
 }
 
 
-if (isset($_GET['action'])) {
-    header('Content-Type: application/json; charset=utf-8');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_GET['action'])) {
+    header('Content-Type: application/json');
     $action = $_GET['action'];
     $path = $_POST['path'] ?? '/';
+    $safe_path = getSafePath_Dialog($user_dir, $path);
+
+    if ($safe_path === false) {
+        echo json_encode(['success' => false, 'message' => 'Invalid path provided.']);
+        exit;
+    }
     
     try {
-        $safe_dir_path = getSafePath_Dialog($user_dir, $path);
-        if ($safe_dir_path === false) throw new Exception('Invalid directory path.');
-
         switch ($action) {
             case 'list_files':
-                if (!is_dir($safe_dir_path)) {
-                    echo json_encode(['success' => false, 'message' => 'Directory not found.']);
-                    exit;
+                $items = [];
+                if (is_dir($safe_path)) {
+                    $files = scandir($safe_path);
+                    foreach ($files as $file) {
+                        if ($file === '.' || $file === '..') continue;
+                        if (strpos($file, SETTINGS_DIR) === 0) continue;
+                        
+                        $item_path = $safe_path . '/' . $file;
+                        $is_dir = is_dir($item_path);
+                        $items[] = [
+                            'name' => $file,
+                            'is_dir' => $is_dir,
+                            'modified' => date('Y/m/d H:i', filemtime($item_path)),
+                            'size' => $is_dir ? 0 : filesize($item_path)
+                        ];
+                    }
                 }
-                
-                $items = scandir($safe_dir_path);
-                $files = []; $dirs = [];
-                foreach ($items as $item) {
-                    if ($item === '.' || $item === '..') continue;
-                    $item_path = $safe_dir_path . '/' . $item;
-                    $is_dir = is_dir($item_path);
-                    $file_info = [
-                        'name' => $item,
-                        'is_dir' => $is_dir,
-                        'size' => $is_dir ? '' : filesize($item_path),
-                        'modified' => date('Y/m/d H:i', filemtime($item_path))
-                    ];
-                    if ($is_dir) $dirs[] = $file_info; else $files[] = $file_info;
-                }
-                usort($dirs, fn($a, $b) => strcasecmp($a['name'], $b['name']));
-                usort($files, fn($a, $b) => strcasecmp($a['name'], $b['name']));
-                
-                echo json_encode(['success' => true, 'items' => array_merge($dirs, $files)]);
+                echo json_encode(['success' => true, 'items' => $items]);
                 break;
-
             case 'create_folder':
-                $folderName = '新規フォルダー';
-                $new_path = $safe_dir_path . '/' . $folderName;
-                $counter = 2;
+                $name = '新しいフォルダー';
+                $i = 1;
+                $new_path = $safe_path . '/' . $name;
                 while(file_exists($new_path)) {
-                    $new_path = $safe_dir_path . '/' . $folderName . ' (' . $counter . ')';
-                    $counter++;
+                    $name = '新しいフォルダー (' . ++$i . ')';
+                    $new_path = $safe_path . '/' . $name;
                 }
-                if (!mkdir($new_path, 0775, true)) throw new Exception('フォルダの作成に失敗しました。');
-                echo json_encode(['success' => true, 'name' => basename($new_path)]);
-                break;
-
-            case 'create_file':
-                $fileName = '新規ファイル.txt';
-                $new_path = $safe_dir_path . '/' . $fileName;
-                 $counter = 2;
-                while(file_exists($new_path)) {
-                    $new_path = $safe_dir_path . '/新規ファイル (' . $counter . ').txt';
-                    $counter++;
-                }
-                if (file_put_contents($new_path, '') === false) throw new Exception('ファイルの作成に失敗しました。');
-                echo json_encode(['success' => true, 'name' => basename($new_path)]);
-                break;
-
-            case 'rename_item':
-                $old_name = $_POST['old_name'] ?? '';
-                $new_name = $_POST['new_name'] ?? '';
-                if(empty($old_name) || empty($new_name)) throw new Exception('名前が指定されていません。');
-
-                $old_path_full = getSafePath_Dialog($user_dir, $path . '/' . $old_name);
-                if(basename($old_path_full) === SETTINGS_DIR) throw new Exception('システムフォルダの名前は変更できません。');
-                $new_path_full = getSafePath_Dialog($user_dir, $path . '/' . $new_name);
-
-                if(!$old_path_full || !file_exists($old_path_full)) throw new Exception('元のアイテムが見つかりません。');
-                if(file_exists($new_path_full)) throw new Exception('同じ名前のアイテムが既に存在します。');
-                if(!rename($old_path_full, $new_path_full)) throw new Exception('名前の変更に失敗しました。');
-                echo json_encode(['success' => true]);
-                break;
-
-            case 'delete_item':
-                $item_name = $_POST['name'] ?? '';
-                if(empty($item_name)) throw new Exception('アイテムが指定されていません。');
-                
-                $item_path_full = getSafePath_Dialog($user_dir, $path . '/' . $item_name);
-                 if(basename($item_path_full) === SETTINGS_DIR) throw new Exception('システムフォルダは削除できません。');
-                if(!$item_path_full || !file_exists($item_path_full)) throw new Exception('アイテムが見つかりません。');
-
-                if (is_dir($item_path_full)) {
-                    if(!deleteDirectoryRecursively_Dialog($item_path_full)) throw new Exception("フォルダ '{$item_name}' の削除に失敗しました。");
+                if(mkdir($new_path, 0775, true)) {
+                    echo json_encode(['success' => true, 'name' => $name]);
                 } else {
-                    if(!unlink($item_path_full)) throw new Exception("ファイル '{$item_name}' の削除に失敗しました。");
+                    throw new Exception('Failed to create folder.');
                 }
-                echo json_encode(['success' => true]);
+                break;
+             case 'create_file':
+                $name = '新規テキストドキュメント.txt';
+                $i = 1;
+                $new_path = $safe_path . '/' . $name;
+                while(file_exists($new_path)) {
+                    $name = '新規テキストドキュメント (' . ++$i . ').txt';
+                    $new_path = $safe_path . '/' . $name;
+                }
+                if(touch($new_path)) {
+                    echo json_encode(['success' => true, 'name' => $name]);
+                } else {
+                    throw new Exception('Failed to create file.');
+                }
+                break;
+            case 'rename_item':
+                $old_name = $_POST['old_name'];
+                $new_name = $_POST['new_name'];
+                $old_path = getSafePath_Dialog($user_dir, $path . '/' . $old_name);
+                $new_path = getSafePath_Dialog($user_dir, $path . '/' . $new_name);
+
+                if ($old_path && $new_path && file_exists($old_path) && !file_exists($new_path)) {
+                    if (rename($old_path, $new_path)) {
+                        echo json_encode(['success' => true]);
+                    } else {
+                        throw new Exception('Failed to rename item.');
+                    }
+                } else {
+                    throw new Exception('Invalid old or new name, or item not found.');
+                }
+                break;
+            case 'delete_item':
+                 $name = $_POST['name'];
+                 $item_path = getSafePath_Dialog($user_dir, $path . '/' . $name);
+                 if ($item_path && file_exists($item_path)) {
+                     if (is_dir($item_path)) {
+                         if(deleteDirectoryRecursively_Dialog($item_path)) {
+                             echo json_encode(['success' => true]);
+                         } else {
+                             throw new Exception('Failed to delete directory.');
+                         }
+                     } else {
+                         if (unlink($item_path)) {
+                            echo json_encode(['success' => true]);
+                         } else {
+                             throw new Exception('Failed to delete file.');
+                         }
+                     }
+                 } else {
+                     throw new Exception('Item not found.');
+                 }
                 break;
         }
     } catch (Exception $e) {
-        http_response_code(500);
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
     }
     exit;
@@ -150,73 +167,43 @@ if (isset($_GET['action'])) {
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8">
-<title>ファイルを開く</title>
-<style>
-    :root { 
-        --bg-main: #FFFFFF; 
-        --bg-secondary: #F0F0F0; 
-        --text-main: #000000; 
-        --border-color: #A0A0A0; 
-        --selection-bg: #0078D7; 
-        --selection-text: #FFFFFF;
-        --button-bg: #E1E1E1;
-        --button-border: #ADADAD;
-        --button-hover-bg: #E5F1FB;
-        --button-hover-border: #0078D7;
-        --selection-bg-inactive: #D4D4D4;
-        --selection-text-inactive: #000000;
-        --menu-highlight-bg: #D6E8F9;
-    }
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: 'Yu Gothic UI', 'Segoe UI', Meiryo, system-ui, sans-serif; font-size: 13px; background: var(--bg-secondary); }
-    .dialog-container { display: flex; flex-direction: column; height: 100%; }
-    .header { padding: 8px; border-bottom: 1px solid var(--border-color); display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
-    .header input { flex-grow: 1; padding: 4px; }
-    .main-content { flex-grow: 1; background: var(--bg-main); border: 1px inset; overflow-y: auto; }
-    .file-table { width: 100%; border-collapse: collapse; }
-    .file-table th { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary); position: sticky; top: 0; user-select: none; }
-    .file-table td { padding: 4px 8px; white-space: nowrap; cursor: default; }
-    .file-table tr:hover { background: #EAF2FB; }
-    .file-table tr.selected { background: var(--selection-bg); color: var(--selection-text); }
-    .file-table tr.context-selected { background: var(--selection-bg); color: var(--selection-text); }
-    
-    .item-name-container input { width: 95%; border: 1px solid var(--selection-bg); outline: none; font: inherit; }
-
-    .footer { padding: 12px; display: grid; grid-template-columns: 80px 1fr auto; grid-template-rows: auto auto; gap: 8px; align-items: center; flex-shrink: 0; }
-    .footer label { text-align: right; }
-    .footer #filename-input { grid-column: 2 / span 2; }
-    .footer #encoding-label { grid-row: 2; grid-column: 1; }
-    .footer #encoding-select { grid-row: 2; grid-column: 2; }
-    .footer .buttons { grid-row: 2; grid-column: 3; text-align: right; }
-    .footer .buttons button {
-        min-width: 80px;
-        height: 28px;
-        padding: 4px 12px;
-        font-size: 13px;
-        background: var(--button-bg);
-        border: 1px solid var(--button-border);
-        border-radius: 3px;
-        cursor: pointer;
-        margin-left: 8px;
-    }
-    .footer .buttons button:hover {
-        border-color: var(--button-hover-border);
-        background: var(--button-hover-bg);
-    }
-    
-    .context-menu { position: fixed; z-index: 1000; background: #F0F0F0; border: 1px solid #A0A0A0; box-shadow: 2px 2px 5px rgba(0,0,0,0.2); min-width: 200px; padding: 4px; border-radius: 4px;}
-    .context-menu-item { padding: 6px 12px; cursor: default; position: relative;}
-    .context-menu-item:hover { background: var(--menu-highlight-bg); }
-    .context-menu-separator { height: 1px; background: var(--border-color); margin: 4px 1px; }
-    .has-submenu::after { content: '▶'; position: absolute; right: 8px; }
-    .submenu { display: none; position: fixed; background: #F0F0F0; border: 1px solid #A0A0A0; box-shadow: 2px 2px 5px rgba(0,0,0,0.2); min-width: 150px; padding: 2px; border-radius: 4px; }
-    .context-menu-item:hover > .submenu { display: block; }
-</style>
+    <meta charset="UTF-8">
+    <title>ファイルを開く</title>
+    <style>
+        body, html {
+            margin: 0; padding: 0; font-family: 'MS UI Gothic', sans-serif;
+            background: #f0f0f0; font-size: 13px;
+        }
+        .dialog-container { display: flex; flex-direction: column; height: 100vh; }
+        .header, .footer { flex-shrink: 0; padding: 12px; background: #f0f0f0; }
+        .main-content {
+            flex-grow: 1; border: 1px solid #999;
+            background: white; overflow-y: auto;
+        }
+        .file-table { width: 100%; border-collapse: collapse; }
+        .file-table th { background: #f0f0f0; text-align: left; padding: 4px; border-bottom: 1px solid #ccc; }
+        .file-table td { padding: 4px; border-bottom: 1px solid #eee; cursor: default; }
+        .file-table tr.selected td { background-color: #0078d7; color: white; }
+        #path-input { width: 100%; margin-bottom: 8px; }
+        .footer { border-top: 1px solid #ccc; display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
+        .footer label { white-space: nowrap; }
+        .footer input[type="text"] { flex-grow: 1; }
+        .footer .buttons { display: flex; gap: 8px; }
+        .context-menu {
+            position: fixed; z-index: 1000; background: #f0f0f0;
+            border: 1px solid #999; min-width: 180px; padding: 2px;
+            box-shadow: 1px 1px 3px rgba(0,0,0,0.2);
+        }
+        .context-menu-item { padding: 4px 12px; cursor: default; }
+        .context-menu-item:hover { background: #0078d7; color: white; }
+        .submenu { display: none; position: absolute; left: 100%; top: -3px; }
+        .context-menu-item.has-submenu::after { content: '▶'; float: right; }
+        .context-menu-item:hover > .submenu { display: block; }
+    </style>
 </head>
 <body>
 <div class="dialog-container">
     <div class="header">
-        <label>現在のパス:</label>
         <input type="text" id="path-input" readonly>
     </div>
     <div class="main-content" id="main-content">
@@ -239,7 +226,6 @@ if (isset($_GET['action'])) {
         </div>
     </div>
 </div>
-
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const getEl = id => document.getElementById(id);
@@ -336,7 +322,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!filename) { alert('ファイル名を入力してください。'); return; }
 
         const normalizedDir = currentDir.endsWith('/') ? currentDir.slice(0, -1) : currentDir;
-        const fullPath = (normalizedDir === '' ? '' : normalizedDir) + '/' + filename;
+        const fullPath = (normalizedDir === '' || normalizedDir === '/') ? '/' + filename : normalizedDir + '/' + filename;
         sendResponseAndClose({ filePath: fullPath, encoding: encodingSelect.value, mode: mode });
     });
     
@@ -377,30 +363,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const positionMenu = (menu, x, y, parentElement = null) => {
         const menuRect = menu.getBoundingClientRect();
-        let newX = x;
-        let newY = y;
-        
+        let newX = x, newY = y;
         if (parentElement) {
             const parentRect = parentElement.getBoundingClientRect();
             newX = parentRect.right;
-            if (newX + menuRect.width > window.innerWidth) {
-                newX = parentRect.left - menuRect.width;
-            }
+            if (newX + menuRect.width > window.innerWidth) newX = parentRect.left - menuRect.width;
             newY = parentRect.top;
         } else {
-             if (newX + menuRect.width > window.innerWidth) {
-                newX = window.innerWidth - menuRect.width - 5;
-            }
+             if (newX + menuRect.width > window.innerWidth) newX = window.innerWidth - menuRect.width - 5;
         }
-        if (newY + menuRect.height > window.innerHeight) {
-            newY = window.innerHeight - menuRect.height - 5;
-        }
-        
-        if (newX < 0) newX = 5;
-        if (newY < 0) newY = 5;
-        
-        menu.style.left = `${newX}px`;
-        menu.style.top = `${newY}px`;
+        if (newY + menuRect.height > window.innerHeight) newY = window.innerHeight - menuRect.height - 5;
+        if (newX < 0) newX = 5; if (newY < 0) newY = 5;
+        menu.style.left = `${newX}px`; menu.style.top = `${newY}px`;
     };
 
     mainContent.addEventListener('contextmenu', e => {
@@ -408,55 +382,35 @@ document.addEventListener('DOMContentLoaded', () => {
         hideContextMenu();
         
         const targetRow = e.target.closest('tr');
-
         document.querySelectorAll('.file-table tr.selected').forEach(r => r.classList.remove('selected'));
         if (targetRow) {
             targetRow.classList.add('selected');
-            if (targetRow.dataset.type === 'file') {
-                filenameInput.value = targetRow.dataset.name;
-            }
+            if (targetRow.dataset.type === 'file') filenameInput.value = targetRow.dataset.name;
         }
         
         contextMenu = document.createElement('div');
         contextMenu.className = 'context-menu';
 
-        if(targetRow) {
-             if (targetRow.dataset.name === '.settings') return;
-             contextMenu.innerHTML = `
-                <div class="context-menu-item" data-action="rename">名前の変更</div>
-                <div class="context-menu-item" data-action="delete">削除</div>`;
+        if(targetRow && targetRow.dataset.name !== '..') {
+             contextMenu.innerHTML = `<div class="context-menu-item" data-action="rename">名前の変更</div><div class="context-menu-item" data-action="delete">削除</div>`;
         } else {
-            contextMenu.innerHTML = `
-                <div class="context-menu-item has-submenu" data-action="create">
-                    <span>新規作成</span>
-                    <div class="submenu">
-                         <div class="context-menu-item" data-action="create_folder">フォルダー</div>
-                         <div class="context-menu-item" data-action="create_file">テキストドキュメント</div>
-                    </div>
-                </div>`;
+            contextMenu.innerHTML = `<div class="context-menu-item has-submenu" data-action="create"><span>新規作成</span><div class="submenu"><div class="context-menu-item" data-action="create_folder">フォルダー</div><div class="context-menu-item" data-action="create_file">テキストドキュメント</div></div></div>`;
         }
-
         document.body.appendChild(contextMenu);
         positionMenu(contextMenu, e.clientX, e.clientY);
         
         contextMenu.querySelectorAll('.has-submenu').forEach(item => {
-            item.addEventListener('mouseenter', () => {
-                const submenu = item.querySelector('.submenu');
-                if (submenu) positionMenu(submenu, 0, 0, item);
-            });
+            item.addEventListener('mouseenter', () => { const submenu = item.querySelector('.submenu'); if (submenu) positionMenu(submenu, 0, 0, item); });
         });
         
         contextMenu.addEventListener('click', async e => {
             const item = e.target.closest('.context-menu-item');
             if (!item || item.classList.contains('has-submenu')) return;
-
             const action = item.dataset.action;
             hideContextMenu();
             try {
                 switch(action) {
-                    case 'rename':
-                        initiateRename(targetRow);
-                        break;
+                    case 'rename': initiateRename(targetRow); break;
                     case 'delete':
                         if (confirm(`'${targetRow.dataset.name}' を削除しますか？`)) {
                             const result = await api('delete_item', { name: targetRow.dataset.name });
@@ -470,27 +424,16 @@ document.addEventListener('DOMContentLoaded', () => {
                         if (!result.success) throw new Error(result.message);
                         await renderFiles(currentDir);
                         const newRow = Array.from(fileListBody.rows).find(r => r.dataset.name === result.name);
-                        if (newRow) {
-                            newRow.classList.add('selected');
-                            initiateRename(newRow);
-                        }
+                        if (newRow) { newRow.classList.add('selected'); initiateRename(newRow); }
                         break;
                 }
-            } catch (err) {
-                alert(`エラー: ${err.message}`);
-            }
+            } catch (err) { alert(`エラー: ${err.message}`); }
         });
     });
-
     document.addEventListener('click', (e) => {
-        if (contextMenu && !contextMenu.contains(e.target)) {
-            hideContextMenu();
-        }
-        if (!mainContent.contains(e.target)) {
-             document.querySelectorAll('.file-table tr.selected').forEach(r => r.classList.remove('selected'));
-        }
+        if (contextMenu && !contextMenu.contains(e.target)) hideContextMenu();
+        if (!mainContent.contains(e.target)) document.querySelectorAll('.file-table tr.selected').forEach(r => r.classList.remove('selected'));
     });
-    
     renderFiles(initialPath ? ('/' + initialPath.split('/').slice(0, -1).join('/')) : '/');
 });
 </script>
