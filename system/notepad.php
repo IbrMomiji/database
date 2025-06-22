@@ -1,4 +1,7 @@
 <?php
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
 $fileToOpen = $_GET['file'] ?? null;
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
@@ -9,14 +12,16 @@ define('SETTINGS_DIR', '.settings');
 define('NOTEPAD_SETTINGS_FILE', SETTINGS_DIR . '/.notepad.json');
 
 if (!isset($_SESSION['username'])) {
-    http_response_code(403); die('Authentication required.');
+    http_response_code(403);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => false, 'message' => 'Authentication required.']);
+    exit;
 }
 $username = $_SESSION['username'];
 $user_dir = NOTEPAD_USER_BASE_DIR . '/' . $username;
 if (!is_dir($user_dir)) {
     mkdir($user_dir, 0775, true);
 }
-// Create settings directory if it doesn't exist
 $settings_path = $user_dir . '/' . SETTINGS_DIR;
 if (!is_dir($settings_path)) {
     mkdir($settings_path, 0775, true);
@@ -25,10 +30,11 @@ if (!is_dir($settings_path)) {
 function getSafePath_Notepad($baseDir, $path) {
     $realBaseDir = realpath($baseDir);
     if ($realBaseDir === false) {
+        error_log("Notepad Security Alert: Base directory '{$baseDir}' not found or inaccessible.");
         return false;
     }
     $userPath = str_replace('\\', '/', $path);
-    if (strpos($userPath, '..') !== false || preg_match('/[:*?"<>|]/', $userPath)) {
+    if (strpos($userPath, "\0") !== false || strpos($userPath, '..') !== false || preg_match('/[:*?"<>|]/', $userPath)) {
         return false;
     }
     $fullPath = $realBaseDir . DIRECTORY_SEPARATOR . ltrim($userPath, '/');
@@ -55,17 +61,27 @@ function getSafePath_Notepad($baseDir, $path) {
 if (isset($_GET['action'])) {
     header('Content-Type: application/json; charset=utf-8');
     $action = $_GET['action'];
-    
+
     try {
         if (!in_array($action, ['get_notepad_settings', 'save_notepad_settings'])) {
-            $path = $_POST['path'] ?? '/';
+            if (!isset($_POST['path'])) {
+                throw new InvalidArgumentException('Path parameter is missing.', 400);
+            }
+            $path = $_POST['path'];
             $safe_path = getSafePath_Notepad($user_dir, $path);
-            if ($safe_path === false) { throw new Exception('Invalid file path.'); }
+            if ($safe_path === false) {
+                throw new InvalidArgumentException('Invalid or disallowed file path.', 400);
+            }
         }
 
         switch ($action) {
             case 'get_content':
-                if (!is_file($safe_path) || !is_readable($safe_path)) { throw new Exception('Cannot read file.'); }
+                if (!is_file($safe_path)) {
+                    throw new RuntimeException('File not found.', 404);
+                }
+                if (!is_readable($safe_path)) {
+                    throw new RuntimeException('Permission denied. Cannot read file.', 403);
+                }
                 $content = file_get_contents($safe_path);
                 $encoding = mb_detect_encoding($content, mb_detect_order(), true);
                 if ($encoding === false) $encoding = 'UTF-8';
@@ -75,17 +91,29 @@ if (isset($_GET['action'])) {
             case 'save_content':
                 $dir_to_save = dirname($safe_path);
                 if (!is_dir($dir_to_save)) {
-                    if (!mkdir($dir_to_save, 0775, true)) { throw new Exception('Failed to create destination directory.'); }
+                    if (!@mkdir($dir_to_save, 0775, true) && !is_dir($dir_to_save)) {
+                        throw new RuntimeException('Failed to create destination directory. Check permissions.', 500);
+                    }
                 }
+
+                if ((is_file($safe_path) && !is_writable($safe_path)) || (!is_file($safe_path) && !is_writable($dir_to_save))) {
+                    throw new RuntimeException('Permission denied. Cannot write to this location.', 403);
+                }
+
                 $content = $_POST['content'] ?? '';
                 $encoding = $_POST['encoding'] ?? 'UTF-8';
                 $content_encoded = mb_convert_encoding($content, $encoding, 'UTF-8');
-                if (file_put_contents($safe_path, $content_encoded) === false) { throw new Exception('Failed to save file.'); }
+                if (file_put_contents($safe_path, $content_encoded) === false) {
+                    throw new RuntimeException('Failed to save file due to a server error.', 500);
+                }
                 echo json_encode(['success' => true, 'message' => 'File saved.']);
                 break;
             case 'get_notepad_settings':
                 $settings_file_path = $user_dir . '/' . NOTEPAD_SETTINGS_FILE;
                 if (file_exists($settings_file_path)) {
+                    if (!is_readable($settings_file_path)) {
+                        throw new RuntimeException('Cannot read settings file.', 403);
+                    }
                     $settings = json_decode(file_get_contents($settings_file_path), true);
                     echo json_encode(['success' => true, 'settings' => $settings]);
                 } else {
@@ -93,17 +121,41 @@ if (isset($_GET['action'])) {
                 }
                 break;
             case 'save_notepad_settings':
+                if (!isset($_POST['settings'])) {
+                    throw new InvalidArgumentException('Settings data is missing.', 400);
+                }
                 $settings = json_decode($_POST['settings'] ?? '{}', true);
                 if (json_last_error() !== JSON_ERROR_NONE) {
-                    throw new Exception('Invalid settings data.');
+                    throw new InvalidArgumentException('Invalid settings data. Malformed JSON.', 400);
                 }
-                 $settings_file_path = $user_dir . '/' . NOTEPAD_SETTINGS_FILE;
-                file_put_contents($settings_file_path, json_encode($settings, JSON_PRETTY_PRINT));
+                $settings_file_path = $user_dir . '/' . NOTEPAD_SETTINGS_FILE;
+                $settings_dir = dirname($settings_file_path);
+
+                if (!is_writable($settings_dir)) {
+                    throw new RuntimeException('Permission denied. Cannot write settings.', 403);
+                }
+
+                if (file_put_contents($settings_file_path, json_encode($settings, JSON_PRETTY_PRINT)) === false) {
+                     throw new RuntimeException('Failed to save settings due to a server error.', 500);
+                }
                 echo json_encode(['success' => true, 'message' => 'Settings saved.']);
                 break;
         }
     } catch (Exception $e) {
-        http_response_code(500);
+        $code = ($e instanceof \InvalidArgumentException || $e instanceof \RuntimeException) && $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500;
+        http_response_code($code);
+
+        error_log(
+            sprintf(
+                "Notepad API Error: [%d] %s in %s:%d (User: %s)",
+                $code,
+                $e->getMessage(),
+                $e->getFile(),
+                $e->getLine(),
+                $username ?? 'N/A'
+            )
+        );
+
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
     }
     exit;
@@ -116,68 +168,161 @@ if (isset($_GET['action'])) {
     <title>Notepad</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
     <style>
+        /* --- Combined CSS from main.css and notepad.php --- */
         :root {
-            --bg-main: #FFFFFF; --bg-menu: #F0F0F0; --text-main: #000000;
-            --border-color: #A0A0A0; --menu-highlight-bg: #D6E8F9; --menu-highlight-border: #92C0E0;
-            --button-border: #C0C0C0; --dialog-bg: #F0F0F0;
+            --bg-main: #FFFFFF;
+            --bg-menu: #F0F0F0;
+            --text-main: #000000;
+            --border-color: #A0A0A0;
+            --menu-highlight-bg: #D6E8F9;
+            --menu-highlight-border: #92C0E0;
+            --button-border: #C0C0C0;
+            --dialog-bg: #F0F0F0;
         }
+
+        @font-face {
+          font-family: 'MS Gothic';
+          src: local('MS Gothic'),
+               local('ＭＳ ゴシック'),
+               local('Osaka-mono');
+        }
+
         html, body {
-            margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden;
-            font-family: 'MS UI Gothic', 'Segoe UI', Meiryo, sans-serif; font-size: 13px;
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'MS UI Gothic', 'Segoe UI', Meiryo, sans-serif;
+            font-size: 13px;
             background-color: var(--bg-main);
             color: var(--text-main);
         }
-        .notepad-container { 
-            display: flex; 
-            flex-direction: column; 
+
+        .notepad-container {
+            display: flex;
+            flex-direction: column;
             height: 100%;
         }
-        .menu-bar { 
-            background: var(--bg-menu); padding: 2px; display: flex; flex-shrink: 0;
-            user-select: none; border-bottom: 1px solid var(--border-color); 
+
+        .menu-bar {
+            background: var(--bg-menu);
+            padding: 2px;
+            display: flex;
+            flex-shrink: 0;
+            user-select: none;
+            border-bottom: 1px solid var(--border-color);
         }
-        .menu-item { padding: 4px 8px; cursor: default; position: relative; }
-        .menu-item:hover, .menu-item.open { background: var(--menu-highlight-bg); border: 1px solid var(--menu-highlight-border); padding: 3px 7px; }
-        .dropdown-menu { display: none; position: absolute; top: 100%; left: 0; background: var(--bg-menu); border: 1px solid var(--border-color); box-shadow: 2px 2px 5px rgba(0,0,0,0.2); min-width: 200px; padding: 2px; z-index: 100; }
-        .menu-item.open > .dropdown-menu { display: block; }
-        .dropdown-item { padding: 4px 20px; display: flex; justify-content: space-between; align-items: center; cursor: default; position: relative;}
-        .dropdown-item:hover:not(.disabled) { background: var(--menu-highlight-bg); }
-        .dropdown-item.disabled { color: #A0A0A0; }
-        .dropdown-item.checked::before { content: '✔'; margin-left: -16px; position: absolute; }
-        .dropdown-separator { height: 1px; background: var(--border-color); margin: 4px 1px; }
+
+        .menu-item {
+            padding: 4px 8px;
+            cursor: default;
+            position: relative;
+        }
+
+        .menu-item:hover, .menu-item.open {
+            background: var(--menu-highlight-bg);
+            border: 1px solid var(--menu-highlight-border);
+            padding: 3px 7px;
+        }
+
+        .dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            left: 0;
+            background: var(--bg-menu);
+            border: 1px solid var(--border-color);
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.2);
+            min-width: 200px;
+            padding: 2px;
+            z-index: 100;
+        }
+
+        .menu-item.open > .dropdown-menu {
+            display: block;
+        }
+
+        .dropdown-item {
+            padding: 4px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: default;
+            position: relative;
+        }
+
+        .dropdown-item:hover:not(.disabled) {
+            background: var(--menu-highlight-bg);
+        }
+
+        .dropdown-item.disabled {
+            color: #A0A0A0;
+        }
+
+        .dropdown-item.checked::before {
+            content: '✔';
+            margin-left: -16px;
+            position: absolute;
+        }
+
+        .dropdown-separator {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 1px;
+        }
+        
         .has-submenu::after { content: '▶'; float: right; }
         .submenu { display: none; position: absolute; left: 100%; top: -3px; }
         .menu-item:hover > .dropdown-menu, .dropdown-item:hover > .dropdown-menu { display: block; }
 
-        .textarea-container { 
+        .textarea-container {
             flex-grow: 1;
-            position: relative; 
+            position: relative;
             background: var(--bg-main);
         }
-        .main-textarea { 
-            box-sizing: border-box; width: 100%; height: 100%; 
-            border: none; outline: none; resize: none; 
-            font-family: 'MS Gothic', monospace; font-size: 15px; line-height: 1.3; 
-            padding: 2px 4px; white-space: pre; word-wrap: normal; 
-            overflow: auto; 
-            position: absolute; top: 0; left: 0;
-            z-index: 2; /* Make sure textarea is on top */
-            background: transparent; color: var(--text-main);
+
+        .main-textarea {
+            box-sizing: border-box;
+            width: 100%;
+            height: 100%;
+            border: none;
+            outline: none;
+            resize: none;
+            font-family: 'MS Gothic', monospace;
+            font-size: 15px;
+            line-height: 1.3;
+            padding: 2px 4px;
+            white-space: pre;
+            word-wrap: normal;
+            overflow: auto;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 2;
+            background: transparent;
+            color: var(--text-main);
             caret-color: black;
         }
+
         .main-textarea.preview-mode {
-            color: rgba(0,0,0,0); /* Fallback */
+            color: rgba(0,0,0,0);
             -webkit-text-fill-color: transparent;
         }
-        .main-textarea.wrap { white-space: pre-wrap; word-wrap: break-word; }
-        
-        .main-textarea::selection {
-            background: #add8e6; /* A standard selection color */
-        }
-        .main-textarea.preview-mode::selection {
-            background: rgba(173, 216, 230, 0.4); /* Make selection visible in preview */
+
+        .main-textarea.wrap {
+            white-space: pre-wrap;
+            word-wrap: break-word;
         }
 
+        .main-textarea::selection {
+            background: #add8e6;
+        }
+
+        .main-textarea.preview-mode::selection {
+            background: rgba(173, 216, 230, 0.4);
+        }
+        
         #code-highlight-pre, #markdown-preview {
             box-sizing: border-box; width: 100%; height: 100%;
             margin: 0; padding: 2px 4px;
@@ -185,45 +330,98 @@ if (isset($_GET['action'])) {
             position: absolute; top: 0; left: 0;
             display: none;
             pointer-events: none;
-            z-index: 1; /* Below the textarea */
+            z-index: 1;
         }
+
         #code-highlight-pre {
             background-color: var(--bg-main);
             white-space: pre;
             word-wrap: normal;
         }
+
         #code-highlight-pre.wrap {
              white-space: pre-wrap;
              word-wrap: break-word;
         }
+
         #markdown-preview {
             background: white; color: black;
             padding: 16px;
-            pointer-events: all; /* Allow scrolling */
+            pointer-events: all;
         }
 
-        .status-bar { 
-            background: var(--bg-menu); padding: 2px 10px; display: flex; 
-            justify-content: flex-end; align-items: center; 
-            border-top: 1px solid var(--border-color); 
+        .status-bar {
+            background: var(--bg-menu);
+            padding: 2px 10px;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            border-top: 1px solid var(--border-color);
             flex-shrink: 0;
-            gap: 20px; 
+            gap: 20px;
         }
-        .status-item { padding: 2px 8px; border-left: 1px solid var(--button-border); border-top: 1px solid var(--button-border); }
+
+        .status-item {
+            padding: 2px 8px;
+            border-left: 1px solid var(--button-border);
+            border-top: 1px solid var(--button-border);
+        }
+
         .status-item:last-child {
             border-right: 1px solid var(--button-border);
         }
+        
         #status-eol {
             min-width: 60px;
             text-align: center;
         }
 
-        .dialog-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.1); z-index: 200; display: none; align-items: center; justify-content: center; }
-        .font-dialog { background: var(--dialog-bg); padding: 12px; border: 1px solid var(--border-color); box-shadow: 2px 2px 8px rgba(0,0,0,0.3); width: 400px; }
-        .font-dialog-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-        .font-dialog-grid label { display: block; margin-bottom: 2px; }
-        .font-dialog-grid input, .font-dialog-grid select { width: 100%; box-sizing: border-box; }
-        .font-preview { border: 1px inset; padding: 12px; margin-top: 12px; height: 60px; background: var(--bg-main); overflow: hidden; }
+        .dialog-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.1);
+            z-index: 200;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .font-dialog {
+            background: var(--dialog-bg);
+            padding: 12px;
+            border: 1px solid var(--border-color);
+            box-shadow: 2px 2px 8px rgba(0,0,0,0.3);
+            width: 400px;
+        }
+
+        .font-dialog-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+        }
+
+        .font-dialog-grid label {
+            display: block;
+            margin-bottom: 2px;
+        }
+
+        .font-dialog-grid input, .font-dialog-grid select {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        .font-preview {
+            border: 1px inset;
+            padding: 12px;
+            margin-top: 12px;
+            height: 60px;
+            background: var(--bg-main);
+            overflow: hidden;
+        }
+
         .font-dialog-buttons {
             text-align: right;
             margin-top: 12px;
@@ -231,6 +429,7 @@ if (isset($_GET['action'])) {
             gap: 8px;
             justify-content: flex-end;
         }
+
         .font-dialog-buttons button {
             min-width: 80px;
             height: 34px;
@@ -245,13 +444,17 @@ if (isset($_GET['action'])) {
             transition: background 0.15s, box-shadow 0.15s;
             box-sizing: border-box;
         }
+        
         .font-dialog-buttons button:active {
             background: #e0e0e0;
         }
+        
         .font-dialog-buttons button:focus {
             box-shadow: 0 0 0 2px #b5d5ff;
         }
+
         .font-family-container { position: relative; }
+        
         .font-family-list {
             display: none;
             position: absolute;
@@ -263,10 +466,12 @@ if (isset($_GET['action'])) {
             width: 100%;
             box-sizing: border-box;
         }
+
         .font-family-item {
             padding: 4px 8px;
             cursor: pointer;
         }
+        
         .font-family-item:hover {
             background-color: var(--menu-highlight-bg);
         }
@@ -327,13 +532,11 @@ if (isset($_GET['action'])) {
                 </div>
             </div>
         </div>
-        
         <div class="textarea-container">
             <textarea class="main-textarea" spellcheck="false"></textarea>
             <pre id="code-highlight-pre" aria-hidden="true"><code id="code-highlight-output" class="language-none"></code></pre>
             <div id="markdown-preview"></div>
         </div>
-    
         <div class="status-bar">
             <div class="status-item" id="status-pos">行 1, 列 1</div>
             <div class="status-item" id="status-zoom">100%</div>
@@ -341,7 +544,6 @@ if (isset($_GET['action'])) {
             <div class="status-item" id="status-eol">CRLF</div>
         </div>
     </div>
-    
     <div class="dialog-overlay" id="font-dialog">
         <div class="font-dialog">
             <div class="font-dialog-grid">
@@ -372,17 +574,14 @@ if (isset($_GET['action'])) {
         const markdownPreview = getEl('markdown-preview');
         const codeHighlightPre = getEl('code-highlight-pre');
         const codeHighlightOutput = getEl('code-highlight-output');
-    
         let isDirty = false;
         let currentFilePath = null;
         let currentEncoding = 'UTF-8';
         let myWindowId = window.name;
-        let baseFontSize = 15; // px単位
-        let currentViewMode = 'text'; // 'text', 'markdown', 'code'
+        let baseFontSize = 15;
+        let currentViewMode = 'text';
         let currentLanguage = 'plaintext';
-        let currentEol = 'CRLF'; // 初期値
-
-        // Prismの言語名マップ
+        let currentEol = 'CRLF';
         const prismLangMap = {
             plaintext: 'none',
             html: 'markup',
@@ -397,18 +596,22 @@ if (isset($_GET['action'])) {
             go: 'go',
             sql: 'sql'
         };
-
         const api = async (action, data = {}) => {
-            const formData = new FormData();
-            for (const key in data) formData.append(key, data[key]);
-            const response = await fetch(`?action=${action}`, { method: 'POST', body: formData });
-            if (!response.ok) {
-                const err = await response.json().catch(() => ({ message: 'サーバーとの通信に失敗しました。' }));
-                throw new Error(err.message);
+            try {
+                const formData = new FormData();
+                for (const key in data) formData.append(key, data[key]);
+                const response = await fetch(`?action=${action}`, { method: 'POST', body: formData });
+                if (!response.ok) {
+                    const errJson = await response.json().catch(() => null);
+                    const message = errJson?.message || `サーバーとの通信に失敗しました。 (Status: ${response.status})`;
+                    throw new Error(message);
+                }
+                return response.json();
+            } catch (error) {
+                console.error(`API Action '${action}' failed:`, error);
+                throw error;
             }
-            return response.json();
         };
-    
         const updateTitle = () => {
             const dirtyMarker = isDirty ? '*' : '';
             const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '無題';
@@ -418,7 +621,6 @@ if (isset($_GET['action'])) {
                 if (parentWindowEl) parentWindowEl.querySelector('.window-title').textContent = newTitle;
             } catch (e) {}
         };
-    
         const updateStatus = () => {
             const text = textArea.value;
             const cursorPos = textArea.selectionStart;
@@ -427,14 +629,11 @@ if (isset($_GET['action'])) {
             statusPos.textContent = `行 ${line}, 列 ${col}`;
             updateEolStatus();
         };
-
         const updateZoomStatus = () => {
             const currentSize = parseInt(getComputedStyle(textArea).fontSize);
             const zoom = Math.round((currentSize / baseFontSize) * 100);
             statusZoom.textContent = `${zoom}%`;
         };
-
-        // 改行コード判定
         const detectEol = (text) => {
             if (!text || (!text.includes('\n') && !text.includes('\r'))) return 'CRLF';
             let crlf = (text.match(/\r\n/g) || []).length;
@@ -445,21 +644,18 @@ if (isset($_GET['action'])) {
             if (cr > 0) return 'CR';
             return 'CRLF';
         };
-
         const updateEolStatus = () => {
             let text = textArea.value;
             let eol = detectEol(text);
             currentEol = eol;
             statusEol.textContent = eol;
         };
-        
         const updateEditMenu = () => {
             const hasSelection = textArea.selectionStart !== textArea.selectionEnd;
             document.querySelector('[data-action="cut"]').classList.toggle('disabled', !hasSelection);
             document.querySelector('[data-action="copy"]').classList.toggle('disabled', !hasSelection);
             document.querySelector('[data-action="delete"]').classList.toggle('disabled', !hasSelection);
         };
-    
         const resetDocument = () => {
             textArea.value = '';
             isDirty = false;
@@ -469,7 +665,6 @@ if (isset($_GET['action'])) {
             updateTitle();
             updateStatus();
         };
-    
         const confirmAndSaveIfNeeded = (callback) => {
             if (!isDirty) {
                 if(callback) callback();
@@ -482,7 +677,6 @@ if (isset($_GET['action'])) {
                 if(callback) callback();
             }
         };
-        
         const handleSave = (callback) => {
             if (currentFilePath) {
                 saveFile(currentFilePath, callback);
@@ -490,7 +684,6 @@ if (isset($_GET['action'])) {
                 openFileDialog('save');
             }
         };
-    
         const openFileDialog = (mode) => {
             try {
                 window.parent.postMessage({
@@ -503,7 +696,6 @@ if (isset($_GET['action'])) {
                 alert('ファイルダイアログを開けませんでした。');
             }
         };
-        
         const loadFile = async (path) => {
             try {
                 const result = await api('get_content', { path });
@@ -518,7 +710,6 @@ if (isset($_GET['action'])) {
                 }
             } catch(e) { alert(`エラー: ${e.message}`); }
         };
-        
         const saveFile = async (path, callback) => {
             try {
                 const result = await api('save_content', { path, content: textArea.value, encoding: currentEncoding });
@@ -530,9 +721,8 @@ if (isset($_GET['action'])) {
                 }
             } catch(e) { alert(`エラー: ${e.message}`); }
         };
-        
-        textArea.addEventListener('input', () => { 
-            if (!isDirty) { isDirty = true; updateTitle(); } 
+        textArea.addEventListener('input', () => {
+            if (!isDirty) { isDirty = true; updateTitle(); }
             if (currentViewMode === 'markdown') renderMarkdown();
             if (currentViewMode === 'code') renderCode();
             updateEolStatus();
@@ -540,15 +730,12 @@ if (isset($_GET['action'])) {
         textArea.addEventListener('keyup', updateStatus);
         textArea.addEventListener('mouseup', updateStatus);
         textArea.addEventListener('selectionchange', updateEditMenu);
-
         textArea.addEventListener('keydown', function(e) {
             if (e.key === 'Tab') {
                 e.preventDefault();
                 document.execCommand('insertText', false, '    ');
             }
         });
-    
-        // メニューの開閉制御
         menuItems.forEach(item => {
             item.addEventListener('mouseenter', (e) => {
                 menuItems.forEach(i => i.classList.remove('open'));
@@ -563,7 +750,6 @@ if (isset($_GET['action'])) {
                 item.classList.add('open');
             });
         });
-        
         document.querySelectorAll('.dropdown-item').forEach(item => {
             item.addEventListener('click', (e) => {
                 if (item.classList.contains('disabled')) return;
@@ -580,10 +766,10 @@ if (isset($_GET['action'])) {
                     case 'paste': navigator.clipboard.readText().then(text => document.execCommand('insertText', false, text)); break;
                     case 'delete': document.execCommand('delete'); break;
                     case 'select-all': textArea.select(); break;
-                    case 'word-wrap': 
-                        item.classList.toggle('checked'); 
+                    case 'word-wrap':
+                        item.classList.toggle('checked');
                         textArea.classList.toggle('wrap');
-                        codeHighlightPre.classList.toggle('wrap'); 
+                        codeHighlightPre.classList.toggle('wrap');
                         saveSettings();
                         break;
                     case 'font': showFontDialog(); break;
@@ -602,18 +788,15 @@ if (isset($_GET['action'])) {
                 }
             });
         });
-    
         const fontDialog = getEl('font-dialog'), fontPreview = getEl('font-preview-text'),
               fontFamilyContainer = document.querySelector('.font-family-container'),
               fontFamilyInput = getEl('font-family-input'), fontStyleSelect = getEl('font-style-select'),
               fontSizeInput = getEl('font-size-input'), fontFamilyList = getEl('font-family-list');
-
         const availableFonts = [
-            'MS Gothic', 'MS Mincho', 'Meiryo', 'Yu Gothic', 'Arial', 'Arial Black', 
-            'Comic Sans MS', 'Courier New', 'Georgia', 'Impact', 'Times New Roman', 
+            'MS Gothic', 'MS Mincho', 'Meiryo', 'Yu Gothic', 'Arial', 'Arial Black',
+            'Comic Sans MS', 'Courier New', 'Georgia', 'Impact', 'Times New Roman',
             'Trebuchet MS', 'Verdana'
         ];
-
         const populateFontList = () => {
             fontFamilyList.innerHTML = '';
             availableFonts.forEach(font => {
@@ -630,7 +813,6 @@ if (isset($_GET['action'])) {
                 fontFamilyList.appendChild(item);
             });
         };
-    
         const updateFontPreview = () => {
             const style = fontStyleSelect.value.split(' ');
             fontPreview.style.fontFamily = fontFamilyInput.value;
@@ -638,7 +820,6 @@ if (isset($_GET['action'])) {
             fontPreview.style.fontWeight = style.includes('bold') ? 'bold' : 'normal';
             fontPreview.style.fontSize = `${fontSizeInput.value}px`;
         };
-    
         const showFontDialog = () => {
             const computedStyle = getComputedStyle(textArea);
             fontFamilyInput.value = computedStyle.fontFamily.split(',')[0].replace(/"/g, '');
@@ -646,92 +827,88 @@ if (isset($_GET['action'])) {
             fontDialog.style.display = 'flex';
             updateFontPreview();
         };
-        
         fontFamilyInput.addEventListener('click', (e) => {
             e.stopPropagation();
             fontFamilyList.style.display = 'block';
         });
-
         [fontStyleSelect, fontSizeInput].forEach(el => el.addEventListener('input', updateFontPreview));
         fontFamilyInput.addEventListener('input', updateFontPreview);
-        
         getEl('font-ok-btn').addEventListener('click', () => {
-            baseFontSize = parseInt(fontSizeInput.value); 
+            baseFontSize = parseInt(fontSizeInput.value);
             applyFontSettings();
             saveSettings();
             fontDialog.style.display = 'none';
         });
-    
         getEl('font-cancel-btn').addEventListener('click', () => {
             fontDialog.style.display = 'none';
         });
-
         const applyFontSettings = () => {
             const style = fontStyleSelect.value.split(' ');
             const newFontSizePx = `${fontSizeInput.value}px`;
             const newFontFamily = fontFamilyInput.value;
             const newFontStyle = style.includes('italic') ? 'italic' : 'normal';
             const newFontWeight = style.includes('bold') ? 'bold' : 'normal';
-
             textArea.style.fontFamily = newFontFamily;
             textArea.style.fontStyle = newFontStyle;
             textArea.style.fontWeight = newFontWeight;
             textArea.style.fontSize = newFontSizePx;
-
-            // コードビューにも同じフォント・サイズを指定
             codeHighlightPre.style.fontFamily = newFontFamily;
             codeHighlightPre.style.fontSize = newFontSizePx;
             codeHighlightPre.style.fontStyle = newFontStyle;
             codeHighlightPre.style.fontWeight = newFontWeight;
-
             updateZoomStatus();
         };
-
         const saveSettings = async () => {
-            const settings = {
-                fontFamily: textArea.style.fontFamily,
-                fontSize: parseInt(getComputedStyle(textArea).fontSize),
-                fontStyle: textArea.style.fontStyle,
-                fontWeight: textArea.style.fontWeight,
-                wordWrap: textArea.classList.contains('wrap'),
-                baseFontSize: baseFontSize
-            };
-            await api('save_notepad_settings', { settings: JSON.stringify(settings) });
+            try {
+                const settings = {
+                    fontFamily: textArea.style.fontFamily,
+                    fontSize: parseInt(getComputedStyle(textArea).fontSize),
+                    fontStyle: textArea.style.fontStyle,
+                    fontWeight: textArea.style.fontWeight,
+                    wordWrap: textArea.classList.contains('wrap'),
+                    baseFontSize: baseFontSize
+                };
+                await api('save_notepad_settings', { settings: JSON.stringify(settings) });
+            } catch (e) {
+                alert(`設定の保存に失敗しました: ${e.message}`);
+            }
         };
-
         const loadSettings = async () => {
-            const result = await api('get_notepad_settings');
-            if (result.success && result.settings) {
-                const { fontFamily, fontSize, fontStyle, fontWeight, wordWrap, baseFontSize: savedBaseSize } = result.settings;
-                baseFontSize = savedBaseSize || 15;
-                const newFontSizePx = `${fontSize || baseFontSize}px`;
-                
-                textArea.style.fontFamily = fontFamily || "'MS Gothic', monospace";
-                textArea.style.fontSize = newFontSizePx;
-                textArea.style.fontStyle = fontStyle || 'normal';
-                textArea.style.fontWeight = fontWeight || 'normal';
-                
-                codeHighlightPre.style.fontFamily = textArea.style.fontFamily;
-                codeHighlightPre.style.fontSize = textArea.style.fontSize;
-                codeHighlightPre.style.fontStyle = textArea.style.fontStyle;
-                codeHighlightPre.style.fontWeight = textArea.style.fontWeight;
-
-                if (wordWrap) {
-                    textArea.classList.add('wrap');
-                    codeHighlightPre.classList.add('wrap');
-                    document.querySelector('[data-action="word-wrap"]').classList.add('checked');
+            try {
+                const result = await api('get_notepad_settings');
+                if (result.success && result.settings) {
+                    const { fontFamily, fontSize, fontStyle, fontWeight, wordWrap, baseFontSize: savedBaseSize } = result.settings;
+                    baseFontSize = savedBaseSize || 15;
+                    const newFontSizePx = `${fontSize || baseFontSize}px`;
+                    textArea.style.fontFamily = fontFamily || "'MS Gothic', monospace";
+                    textArea.style.fontSize = newFontSizePx;
+                    textArea.style.fontStyle = fontStyle || 'normal';
+                    textArea.style.fontWeight = fontWeight || 'normal';
+                    codeHighlightPre.style.fontFamily = textArea.style.fontFamily;
+                    codeHighlightPre.style.fontSize = textArea.style.fontSize;
+                    codeHighlightPre.style.fontStyle = textArea.style.fontStyle;
+                    codeHighlightPre.style.fontWeight = textArea.style.fontWeight;
+                    if (wordWrap) {
+                        textArea.classList.add('wrap');
+                        codeHighlightPre.classList.add('wrap');
+                        document.querySelector('[data-action="word-wrap"]').classList.add('checked');
+                    } else {
+                        textArea.classList.remove('wrap');
+                        codeHighlightPre.classList.remove('wrap');
+                        document.querySelector('[data-action="word-wrap"]').classList.remove('checked');
+                    }
                 } else {
-                    textArea.classList.remove('wrap');
-                    codeHighlightPre.classList.remove('wrap');
-                    document.querySelector('[data-action="word-wrap"]').classList.remove('checked');
+                     textArea.style.fontSize = `${baseFontSize}px`;
+                     codeHighlightPre.style.fontSize = `${baseFontSize}px`;
                 }
-            } else {
+            } catch (e) {
+                 alert(`設定の読み込みに失敗しました: ${e.message}`);
                  textArea.style.fontSize = `${baseFontSize}px`;
                  codeHighlightPre.style.fontSize = `${baseFontSize}px`;
+            } finally {
+                updateZoomStatus();
             }
-            updateZoomStatus();
         };
-        
         document.addEventListener('click', (e) => {
             if (!fontFamilyContainer.contains(e.target)) {
                 fontFamilyList.style.display = 'none';
@@ -742,25 +919,20 @@ if (isset($_GET['action'])) {
                 }
             });
         });
-
-        // 言語選択時チェック＆Prism対応
         document.querySelectorAll('[data-action="view-lang"]').forEach(item => {
             item.addEventListener('click', (e) => {
                 document.querySelectorAll('[data-action="view-lang"]').forEach(i => i.classList.remove('checked'));
                 item.classList.add('checked');
                 document.querySelector('[data-action="view-markdown"]').classList.remove('checked');
                 currentLanguage = item.dataset.lang;
-                switchViewMode(lang === 'plaintext' ? 'text' : 'code');
+                switchViewMode(currentLanguage === 'plaintext' ? 'text' : 'code');
             });
         });
-
-        // コード/マークダウン/テキスト切り替え
         const switchViewMode = (mode) => {
             currentViewMode = mode;
             markdownPreview.style.display = 'none';
             codeHighlightPre.style.display = 'none';
             textArea.classList.remove('preview-mode');
-
             if (mode === 'markdown') {
                 markdownPreview.style.display = 'block';
                 textArea.classList.add('preview-mode');
@@ -771,32 +943,25 @@ if (isset($_GET['action'])) {
                 renderCode();
             }
         };
-
         const renderMarkdown = () => {
             markdownPreview.innerHTML = marked.parse(textArea.value);
         };
-
-        // Prism.jsでシンタックスハイライトを正しく付与する
         const renderCode = () => {
-            // コードビューにも常に現在のtextareaのフォント・サイズを指定
             codeHighlightPre.style.fontFamily = textArea.style.fontFamily;
             codeHighlightPre.style.fontSize = textArea.style.fontSize;
             codeHighlightPre.style.fontStyle = textArea.style.fontStyle;
             codeHighlightPre.style.fontWeight = textArea.style.fontWeight;
-
             const prismLang = prismLangMap[currentLanguage] || 'none';
-            codeHighlightOutput.textContent = textArea.value; // いったん生テキスト
+            codeHighlightOutput.textContent = textArea.value;
             codeHighlightOutput.className = `language-${prismLang}`;
             Prism.highlightElement(codeHighlightOutput);
         };
-
         textArea.addEventListener('scroll', () => {
             if(currentViewMode === 'code') {
                 codeHighlightPre.scrollTop = textArea.scrollTop;
                 codeHighlightPre.scrollLeft = textArea.scrollLeft;
             }
         });
-
         window.addEventListener('message', (event) => {
             const { type, filePath, mode, sourceWindowId } = event.data;
             if (type === 'fileDialogResponse' && sourceWindowId === myWindowId) {
@@ -809,12 +974,11 @@ if (isset($_GET['action'])) {
                 }
             }
         });
-        
         document.addEventListener('keydown', e => {
             if (e.ctrlKey && (e.key === '+' || e.key === '=')) {
                 e.preventDefault();
                 const currentSize = parseInt(getComputedStyle(textArea).fontSize);
-                const newSize = Math.min(Math.round(baseFontSize * 10), currentSize + 1); // Max 1000%
+                const newSize = Math.min(Math.round(baseFontSize * 10), currentSize + 1);
                 textArea.style.fontSize = `${newSize}px`;
                 codeHighlightPre.style.fontSize = `${newSize}px`;
                 updateZoomStatus();
@@ -822,19 +986,18 @@ if (isset($_GET['action'])) {
             if (e.ctrlKey && e.key === '-') {
                 e.preventDefault();
                 const currentSize = parseInt(getComputedStyle(textArea).fontSize);
-                const newSize = Math.max(Math.round(baseFontSize * 0.1), currentSize - 1); // Min 10%
+                const newSize = Math.max(Math.round(baseFontSize * 0.1), currentSize - 1);
                 textArea.style.fontSize = `${newSize}px`;
                 codeHighlightPre.style.fontSize = `${newSize}px`;
                 updateZoomStatus();
             }
-            if (e.ctrlKey && e.key === '0') { 
+            if (e.ctrlKey && e.key === '0') {
                 e.preventDefault();
                 textArea.style.fontSize = `${baseFontSize}px`;
                 codeHighlightPre.style.fontSize = `${baseFontSize}px`;
                 updateZoomStatus();
             }
         });
-    
         const initializeApp = async () => {
             await loadSettings();
             const fileToOpenOnInit = <?php echo json_encode($fileToOpen); ?>;
@@ -847,7 +1010,6 @@ if (isset($_GET['action'])) {
             updateEditMenu();
             updateStatus();
         };
-
         initializeApp();
     });
     </script>
