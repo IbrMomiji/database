@@ -1,172 +1,198 @@
 <?php
 define('BASE_PATH', dirname(__DIR__));
-if (!defined('DB_PATH')) {
-    define('DB_PATH', BASE_PATH . '/database.db');
-}
+defined('DB_PATH') || define('DB_PATH', BASE_PATH . '/db/database.sqlite');
 
 if (session_status() === PHP_SESSION_NONE) {
+    session_set_cookie_params([
+        'httponly' => true,
+        'samesite' => 'Strict'
+    ]);
     session_start();
+    session_regenerate_id(true);
 }
 
-function login($username, $password) {
-    try {
-        $pdo = new PDO('sqlite:' . DB_PATH);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    } catch (Exception $e) {
-        return false;
+require_once BASE_PATH . '/system/Database.php';
+require_once BASE_PATH . '/system/auth.php';
+
+$auth = new Auth();
+$login_error = null;
+$is_logged_in_as_other_user = false;
+
+function process_admin_login(Auth $auth) {
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !isset($_POST['username'], $_POST['password'])) {
+        return null;
     }
 
-    try {
-        $stmt = $pdo->prepare("SELECT * FROM users WHERE username = :username");
-        $stmt->bindParam(':username', $username, PDO::PARAM_STR);
-        $stmt->execute();
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+    $username = $_POST['username'];
+    $password = $_POST['password'];
 
-        if ($user && password_verify($password, $user['password_hash'])) {
-            $_SESSION['user_id'] = $user['id'];
-            $_SESSION['username'] = $user['username'];
-            return true;
-        } else {
-            return false;
-        }
-    } catch (Exception $e) {
-        return false;
+    if ($username !== 'root') {
+        return "管理者(root)アカウントのみログイン可能です";
     }
+
+    $result = $auth->login($username, $password);
+    if (!$result['success']) {
+        return "認証に失敗しました";
+    }
+
+    if ($_SESSION['username'] === 'root') {
+        header("Location: index.php");
+        exit;
+    }
+
+    return "管理者権限が確認できません";
 }
 
-function is_login() {
-    return isset($_SESSION['user_id']);
+$login_error = process_admin_login($auth);
+
+if ($auth->isLoggedIn() && ($_SESSION['username'] ?? '') === 'root') {
+    require_once BASE_PATH . '/admin/management.php';
+} else {
+    $is_logged_in_as_other_user = $auth->isLoggedIn();
+    display_login_page($login_error, $is_logged_in_as_other_user);
 }
 
-function display_login_page($login_error, $is_logged_in_as_other_user) {
-?>
+function display_login_page(?string $error, bool $is_other_user) {
+    $current_user = htmlspecialchars($_SESSION['username'] ?? '');
+    ?>
     <!DOCTYPE html>
     <html lang="ja">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>管理者ログイン</title>
-        <link rel="stylesheet" href="../style/main.css">
         <style>
             body {
                 background-color: #1a1a1a;
                 color: #e0e0e0;
-                font-family: 'MS Gothic', 'Osaka-Mono', monospace;
+                font-family: 'SF Mono', 'Consolas', monospace;
                 display: flex;
                 justify-content: center;
                 align-items: center;
-                height: 100vh;
+                min-height: 100vh;
                 margin: 0;
-            }
-            .login-container {
-                width: 360px;
-                padding: 40px;
-                background-color: #222;
-                border: 1px solid #444;
-                box-shadow: 0 0 15px rgba(0,0,0,0.7);
-                text-align: center;
-            }
-            .login-container h1 {
-                color: #e0e0e0;
-                margin-bottom: 20px;
-                font-size: 1.8em;
-            }
-            .login-container .error {
-                color: #ff6666;
-                background-color: rgba(255, 102, 102, 0.1);
-                border: 1px solid #ff6666;
-                padding: 10px;
-                margin-bottom: 20px;
-                border-radius: 4px;
-                text-align: left;
-            }
-             .login-container .info {
-                color: #66aaff;
-                background-color: rgba(102, 170, 255, 0.1);
-                border: 1px solid #66aaff;
-                padding: 10px;
-                margin-bottom: 20px;
-                border-radius: 4px;
-            }
-            .login-container input {
-                width: 100%;
-                padding: 12px;
-                margin-bottom: 15px;
-                background-color: #333;
-                border: 1px solid #555;
-                color: #e0e0e0;
-                font-family: inherit;
+                padding: 20px;
                 box-sizing: border-box;
             }
-            .login-container button {
+            .login-container {
                 width: 100%;
-                padding: 12px;
-                background-color: #4CAF50;
-                border: none;
+                max-width: 400px;
+                padding: 2.5rem;
+                background: #222;
+                border: 1px solid #444;
+                box-shadow: 0 0.5rem 1.5rem rgba(0, 0, 0, 0.5);
+                border-radius: 8px;
+            }
+            .login-title {
+                color: #4CAF50;
+                text-align: center;
+                margin-bottom: 1.8rem;
+                font-size: 1.8rem;
+                font-weight: 500;
+            }
+            .alert-box {
+                padding: 0.9rem;
+                margin-bottom: 1.5rem;
+                border-radius: 6px;
+                font-size: 0.95rem;
+            }
+            .alert-error {
+                background: rgba(255, 80, 80, 0.15);
+                border: 1px solid #ff5050;
+                color: #ff9999;
+            }
+            .alert-info {
+                background: rgba(80, 150, 255, 0.15);
+                border: 1px solid #4d8af0;
+                color: #a0c8ff;
+            }
+            .login-form input {
+                width: 100%;
+                padding: 0.9rem;
+                margin-bottom: 1.2rem;
+                background: #2d2d2d;
+                border: 1px solid #444;
+                color: #f0f0f0;
+                border-radius: 4px;
+                font-size: 1rem;
+                outline: none;
+                transition: border 0.2s;
+            }
+            .login-form input:focus {
+                border-color: #4CAF50;
+            }
+            .login-button {
+                width: 100%;
+                padding: 0.9rem;
+                background: #2e7d32;
                 color: white;
-                font-family: inherit;
-                font-size: 1em;
+                border: none;
+                border-radius: 4px;
+                font-size: 1.05rem;
                 cursor: pointer;
-                transition: background-color 0.3s;
+                transition: background 0.3s;
             }
-            .login-container button:hover {
-                background-color: #45a049;
+            .login-button:hover {
+                background: #388e3c;
             }
-            .login-container a {
-                color: #66aaff;
-                text-decoration: none;
+            .back-link {
                 display: block;
-                margin-top: 20px;
+                text-align: center;
+                margin-top: 1.5rem;
+                color: #64b5f6;
+                text-decoration: none;
+                font-size: 0.95rem;
             }
-            .login-container a:hover {
+            .back-link:hover {
                 text-decoration: underline;
+            }
+            .username-display {
+                font-family: monospace;
+                background: #333;
+                padding: 0.2rem 0.4rem;
+                border-radius: 3px;
             }
         </style>
     </head>
     <body>
         <div class="login-container">
-            <h1>管理者ログイン</h1>
-
-            <?php if ($is_logged_in_as_other_user): ?>
-                <div class="info">
-                    <p>このページへのアクセスは `root` ユーザーのみに許可されています。</p>
-                    <p>現在 `<?php echo htmlspecialchars($_SESSION['username']); ?>` としてログインしています。</p>
+            <h1 class="login-title">管理者ログイン</h1>
+            
+            <?php if ($is_other_user): ?>
+                <div class="alert-box alert-info">
+                    <p>このページは <strong>root</strong> ユーザー専用です</p>
+                    <p>現在 <span class="username-display"><?= $current_user ?></span> としてログイン中</p>
                 </div>
             <?php endif; ?>
 
-            <?php if ($login_error): ?>
-                <div class="error"><?php echo htmlspecialchars($login_error); ?></div>
+            <?php if ($error): ?>
+                <div class="alert-box alert-error">
+                    <?= htmlspecialchars($error) ?>
+                </div>
             <?php endif; ?>
 
-            <form action="index.php" method="POST">
-                <input type="text" name="username" placeholder="ユーザー名" value="root" required>
-                <input type="password" name="password" placeholder="パスワード" required>
-                <button type="submit">ログイン</button>
+            <form class="login-form" action="index.php" method="POST">
+                <input type="text" 
+                       name="username" 
+                       placeholder="ユーザー名" 
+                       value="root" 
+                       required 
+                       autocomplete="off"
+                       autocorrect="off"
+                       spellcheck="false">
+                
+                <input type="password" 
+                       name="password" 
+                       placeholder="パスワード" 
+                       required
+                       autocomplete="current-password">
+                
+                <button type="submit" class="login-button">ログイン</button>
             </form>
 
-            <a href="../index.php">メインページに戻る</a>
+            <a href="../index.php" class="back-link">メインページに戻る</a>
         </div>
     </body>
     </html>
-<?php
-}
-
-$login_error = null;
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username']) && isset($_POST['password'])) {
-    $username = $_POST['username'];
-    $password = $_POST['password'];
-
-    if ($username === 'root' && login($username, $password)) {
-        header("Location: index.php");
-        exit;
-    } else {
-        $login_error = "管理者（root）のユーザー名またはパスワードが正しくありません。";
-    }
-}
-
-if (is_login() && isset($_SESSION['username']) && $_SESSION['username'] === 'root') {
-    require_once BASE_PATH . '/admin/management.php';
-} else {
-    $is_logged_in_as_other_user = is_login();
-    display_login_page($login_error, $is_logged_in_as_other_user);
+    <?php
 }

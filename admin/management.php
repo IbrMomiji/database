@@ -1,53 +1,34 @@
 <?php
-/**
- * admin/management.php
- * 管理者向けダッシュボード
- * このファイルは index.php によってrootユーザー認証後にのみ読み込まれます。
- */
+require_once BASE_PATH . '/system/Database.php';
 
-// データベースのインスタンスを取得します
 $db = Database::getInstance();
-$pdo = $db->getPdo();
+$pdo = $db->getConnection();
 
-/**
- * 指定されたディレクトリの内容を再帰的にスキャンし、HTMLのリストとして整形する関数
- * @param string $dirPath スキャンするディレクトリのパス
- * @return string ディレクトリ構造を示すHTML文字列
- */
 function listDirectoryContents($dirPath) {
-    // ディレクトリが存在し、読み取り可能かチェックします
     if (!is_dir($dirPath) || !is_readable($dirPath)) {
         return '<ul><li>ディレクトリを読み込めません: ' . htmlspecialchars($dirPath) . '</li></ul>';
     }
 
     $html = '<ul>';
-    // scandirでディレクトリ内のアイテムを取得します
     $items = scandir($dirPath);
 
     foreach ($items as $item) {
-        // '.' と '..' は現在のディレクトリと親ディレクトリを示すため除外します
-        if ($item === '.' || $item === '..') {
-            continue;
-        }
-
+        if ($item === '.' || $item === '..') continue;
+        
         $path = $dirPath . DIRECTORY_SEPARATOR . $item;
         if (is_dir($path)) {
-            // アイテムがディレクトリの場合、再帰的にこの関数を呼び出します
-            $html .= '<li><strong><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414.586l.828.828A2 2 0 0 0 9.828 3h3.982a2 2 0 0 1 1.992 2.181l-.637 7A2 2 0 0 1 13.174 14H2.826a2 2 0 0 1-1.991-1.819l-.637-7a1.99 1.99 0 0 1 .54-1.31zM2.19 4a1 1 0 0 0-.996.81l.637 7a1 1 0 0 0 .995.89h10.348a1 1 0 0 0 .995-.89l.637-7A1 1 0 0 0 13.81 4H2.19zm4.69-1.707A1 1 0 0 0 6.172 2H2.5a1 1 0 0 0-1 .981l.006.139C1.72 3.042 1.95 3 2.19 3h5.396l-.707-.707z"/></svg> ' . htmlspecialchars($item) . '/</strong>';
+            $html .= '<li><strong><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.54 3.87.5 3a2 2 0 0 1 2-2h3.672a2 2 0 0 1 1.414..."/></svg> ' . htmlspecialchars($item) . '</strong>';
             $html .= listDirectoryContents($path);
             $html .= '</li>';
         } else {
-            // アイテムがファイルの場合、リストアイテムとして追加します
-            $html .= '<li><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/></svg> ' . htmlspecialchars($item) . '</li>';
+            $html .= '<li><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1..."/></svg> ' . htmlspecialchars($item) . '</li>';
         }
     }
     $html .= '</ul>';
     return $html;
 }
 
-// 全ユーザーのディレクトリが格納されているベースパス
-$usersBasePath = __DIR__ . '/../users';
-
+$usersBasePath = realpath(__DIR__ . '/../user') ?: __DIR__ . '/../user';
 ?>
 <!DOCTYPE html>
 <html lang="ja">
@@ -56,7 +37,6 @@ $usersBasePath = __DIR__ . '/../users';
     <title>管理者ページ</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        /* 管理ページ用のカスタムスタイル */
         body {
             background-color: #f0f2f5;
             color: #333;
@@ -151,48 +131,44 @@ $usersBasePath = __DIR__ . '/../users';
 <div class="container">
     <h1>管理者ダッシュボード</h1>
 
-    <!-- データベース情報セクション -->
     <div id="database-info" class="section">
         <h2>データベース情報</h2>
         <?php
         try {
-            // SHOW TABLESクエリで全テーブル名を取得します
-            $tablesQuery = $pdo->query("SHOW TABLES");
+            $tablesQuery = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'");
             $tables = $tablesQuery->fetchAll(PDO::FETCH_COLUMN);
 
             if (empty($tables)) {
                 echo "<p class='info-message'>データベースにテーブルが見つかりません。</p>";
             } else {
                 foreach ($tables as $table) {
-                    echo "<h3>テーブル: " . htmlspecialchars($table) . "</h3>";
+                    $safeTable = htmlspecialchars($table);
+                    echo "<h3>テーブル: {$safeTable}</h3>";
 
-                    // 各テーブルから全てのデータを取得します
-                    $stmt = $pdo->query("SELECT * FROM " . $table);
+                    $stmt = $pdo->query("SELECT * FROM " . $pdo->quote($table));
                     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
                     if (empty($rows)) {
                         echo "<p class='info-message'>このテーブルにはデータがありません。</p>";
-                    } else {
-                        echo "<table>";
-                        // テーブルヘッダーを動的に生成します
-                        echo "<thead><tr>";
-                        foreach (array_keys($rows[0]) as $column) {
-                            echo "<th>" . htmlspecialchars($column) . "</th>";
-                        }
-                        echo "</tr></thead>";
-
-                        // テーブルの各行を生成します
-                        echo "<tbody>";
-                        foreach ($rows as $row) {
-                            echo "<tr>";
-                            foreach ($row as $cell) {
-                                echo "<td>" . htmlspecialchars($cell ?? 'NULL') . "</td>";
-                            }
-                            echo "</tr>";
-                        }
-                        echo "</tbody>";
-                        echo "</table>";
+                        continue;
                     }
+
+                    $columns = array_keys($rows[0]);
+                    echo "<table><thead><tr>";
+                    foreach ($columns as $col) {
+                        echo "<th>" . htmlspecialchars($col) . "</th>";
+                    }
+                    echo "</tr></thead><tbody>";
+
+                    foreach ($rows as $row) {
+                        echo "<tr>";
+                        foreach ($columns as $col) {
+                            $value = $row[$col] ?? 'NULL';
+                            echo "<td>" . htmlspecialchars($value) . "</td>";
+                        }
+                        echo "</tr>";
+                    }
+                    echo "</tbody></table>";
                 }
             }
         } catch (PDOException $e) {
@@ -201,38 +177,31 @@ $usersBasePath = __DIR__ . '/../users';
         ?>
     </div>
 
-    <!-- ファイルエクスプローラーセクション -->
     <div id="file-explorer" class="section">
         <h2>ユーザーフォルダの内容</h2>
         <?php
-        if (is_dir($usersBasePath) && is_readable($usersBasePath)) {
-            $userDirs = scandir($usersBasePath);
-            $foundUserDirs = false;
-            foreach ($userDirs as $userDir) {
-                if ($userDir === '.' || $userDir === '..') {
-                    continue;
-                }
-
-                $fullPath = $usersBasePath . DIRECTORY_SEPARATOR . $userDir;
-                if (is_dir($fullPath)) {
-                    $foundUserDirs = true;
-                    echo "<h3>ユーザー: " . htmlspecialchars($userDir) . "</h3>";
-                    echo "<div class='file-explorer'>";
-                    // listDirectoryContents関数でディレクトリ構造を表示します
-                    echo listDirectoryContents($fullPath);
-                    echo "</div>";
-                }
-            }
-            if (!$foundUserDirs) {
-                echo "<p class='info-message'>ユーザーディレクトリが見つかりません。</p>";
-            }
-        } else {
+        if (!is_dir($usersBasePath) || !is_readable($usersBasePath)) {
             echo "<p class='error-message'>ユーザーディレクトリ '" . htmlspecialchars($usersBasePath) . "' が存在しないか、読み取り権限がありません。</p>";
+            exit;
+        }
+
+        $userDirs = array_diff(scandir($usersBasePath), ['.', '..']);
+        if (empty($userDirs)) {
+            echo "<p class='info-message'>ユーザーディレクトリが見つかりません。</p>";
+            exit;
+        }
+
+        foreach ($userDirs as $userDir) {
+            $fullPath = $usersBasePath . DIRECTORY_SEPARATOR . $userDir;
+            if (!is_dir($fullPath)) continue;
+
+            echo "<h3>ユーザー: " . htmlspecialchars($userDir) . "</h3>";
+            echo "<div class='file-explorer'>";
+            echo listDirectoryContents($fullPath);
+            echo "</div>";
         }
         ?>
     </div>
-
 </div>
-
 </body>
 </html>
