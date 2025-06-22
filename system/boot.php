@@ -1,20 +1,20 @@
 <?php
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+
+$cookieParams = session_get_cookie_params();
+session_set_cookie_params([
+    'lifetime' => $cookieParams['lifetime'],
+    'path' => '/',
+    'domain' => $cookieParams['domain'],
+    'secure' => isset($_SERVER['HTTPS']),
+    'httponly' => true,
+    'samesite' => 'Lax'
+]);
+
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
-
-if (
-    $_SERVER['REQUEST_METHOD'] !== 'POST' && 
-    !(isset($_GET['action']) && $_GET['action'] === 'get_privacy_policy')
-) {
-    $_SESSION = [];
-    session_destroy();
-    session_start();
-}
-
-error_reporting(E_ALL & ~E_WARNING);
-ini_set('display_errors', 0);
-ini_set('log_errors', 1);
 
 define('DB_PATH', __DIR__ . '/../db/database.sqlite');
 define('USER_DIR_PATH', __DIR__ . '/../user');
@@ -52,7 +52,7 @@ spl_autoload_register(function ($class_name) {
 });
 
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && strpos($_SERVER['REQUEST_URI'], '/system/application/') === false) {
     header('Content-Type: application/json; charset=utf-8');
     
     $postData = json_decode(file_get_contents('php://input'), true);

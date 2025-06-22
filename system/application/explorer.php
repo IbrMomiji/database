@@ -1,15 +1,7 @@
 <?php
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../boot.php';
 
-define('USER_BASE_DIR', __DIR__ . '/../../user');
-define('SETTINGS_DIR', '.settings');
-define('FAVORITES_FILE', SETTINGS_DIR . '/.favorites.json');
-define('MAX_STORAGE_MB', 100);
-define('MAX_STORAGE_BYTES', MAX_STORAGE_MB * 1024 * 1024);
-
-if (!isset($_SESSION['user_id'], $_SESSION['user_uuid'])) {
+if (!isset($_SESSION['user_id'])) {
     if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) == 'xmlhttprequest') {
         header('Content-Type: application/json; charset=utf-8');
         http_response_code(403);
@@ -20,15 +12,81 @@ if (!isset($_SESSION['user_id'], $_SESSION['user_uuid'])) {
     exit;
 }
 
-$username = $_SESSION['username'];
-$user_dir = USER_BASE_DIR . '/' . $_SESSION['user_uuid'];
+try {
+    $db = Database::getInstance()->getConnection();
+    $stmt = $db->prepare("SELECT username, uuid FROM users WHERE id = :id");
+    $stmt->execute([':id' => $_SESSION['user_id']]);
+    $user = $stmt->fetch();
+
+    if (!$user) {
+        throw new Exception('ユーザー情報が見つかりません。再ログインしてください。');
+    }
+    $username = $user['username'];
+    $user_uuid = $user['uuid'];
+
+} catch (Exception $e) {
+    http_response_code(500);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['success' => false, 'message' => 'データベースエラー: ' . $e->getMessage()]);
+    exit;
+}
+
+define('SETTINGS_DIR', '.settings');
+define('FAVORITES_FILE', SETTINGS_DIR . '/.favorites.json');
+define('MAX_STORAGE_MB', 100);
+define('MAX_STORAGE_BYTES', MAX_STORAGE_MB * 1024 * 1024);
+
+$user_dir = USER_DIR_PATH . '/' . $user_uuid;
 
 if (!is_dir($user_dir)) {
-    mkdir($user_dir, 0777, true);
+    mkdir($user_dir, 0775, true);
 }
 $settings_path = $user_dir . '/' . SETTINGS_DIR;
 if (!is_dir($settings_path)) {
-    mkdir($settings_path, 0777, true);
+    mkdir($settings_path, 0775, true);
+}
+
+function getSafePath($baseDir, $path) {
+    $path = str_replace(chr(0), '', $path);
+    $path = str_replace('\\', '/', $path);
+    $parts = explode('/', $path);
+    $safeParts = [];
+    foreach ($parts as $part) {
+        if ($part === '' || $part === '.') {
+            continue;
+        }
+        if ($part === '..') {
+            if (count($safeParts) > 0) {
+                array_pop($safeParts);
+            }
+        } else {
+            $safeParts[] = $part;
+        }
+    }
+    $fullPath = rtrim($baseDir, '/') . '/' . implode('/', $safeParts);
+    $realBaseDir = realpath($baseDir);
+    if ($realBaseDir === false) {
+        return false;
+    }
+
+    $checkPath = $fullPath;
+    if (!file_exists($checkPath)) {
+        $checkPath = dirname($checkPath);
+    }
+    
+    $realCheckPath = realpath($checkPath);
+    if ($realCheckPath === false) {
+        if (is_writable($baseDir)) {
+             return $fullPath;
+        }
+        return false;
+    }
+
+    if (strpos($realCheckPath, $realBaseDir) !== 0) {
+        return false;
+    }
+
+    return $fullPath;
 }
 
 function getDirectorySize($dir) {
@@ -63,33 +121,6 @@ function formatBytes($bytes) {
     return round($bytes, 2) . ' ' . $units[$pow];
 }
 
-function getSafePath($baseDir, $path) {
-    $path = str_replace('\\', '/', $path);
-    $path = '/' . trim($path, '/');
-    $parts = explode('/', $path);
-    $safeParts = [];
-    foreach ($parts as $part) {
-        if ($part === '.' || $part === '') continue;
-        if ($part === '..') {
-            if (!empty($safeParts)) array_pop($safeParts);
-        } else {
-            $part = preg_replace('/[\\\\\/:\*\?"<>|]/', '', $part);
-            if($part !== '') $safeParts[] = $part;
-        }
-    }
-    $finalPath = $baseDir . '/' . implode('/', $safeParts);
-    $realBaseDir = realpath($baseDir);
-    $realFinalPath = realpath($finalPath);
-
-    if ($realFinalPath !== false) {
-        if (strpos($realFinalPath, $realBaseDir) !== 0) return false;
-    } else {
-        $realParentPath = realpath(dirname($finalPath));
-         if ($realParentPath === false || strpos($realParentPath, $realBaseDir) !== 0) return false;
-    }
-    return rtrim($finalPath, '/');
-}
-
 function getFileType($filePath) {
     if (is_dir($filePath)) return 'ファイル フォルダー';
     $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
@@ -114,18 +145,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $path = $_POST['path'] ?? '/';
 
     try {
-        if (!in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites'])) {
-            $safe_path = getSafePath($user_dir, $path);
-            if ($safe_path === false) throw new Exception('無効なパスです。');
+        $safe_path = getSafePath($user_dir, $path);
+        if ($safe_path === false && !in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites'])) {
+            throw new Exception('無効なパスです。');
         }
 
         switch ($action) {
             case 'list':
-                $files = []; if (!is_dir($safe_path)) {
-                     echo json_encode(['success' => true, 'path' => $path, 'files' => []]);
-                     exit;
+                $files = [];
+                if (!is_dir($safe_path) || !is_readable($safe_path)) {
+                    echo json_encode(['success' => true, 'path' => $path, 'files' => []]);
+                    exit;
                 }
                 $items = scandir($safe_path);
+                if ($items === false) {
+                    throw new Exception("ディレクトリの読み込みに失敗しました。パーミッションを確認してください。");
+                }
                 foreach ($items as $item) {
                     if ($item === '.' || $item === '..') continue;
                     $item_path = $safe_path . '/' . $item;
@@ -288,7 +323,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             --text-secondary-color: #c5c5c5;
             --accent-color: #4cc2ff;
         }
-
         html, body {
             margin: 0; padding: 0; width: 100%; height: 100%;
             overflow: hidden;
@@ -301,7 +335,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         ::-webkit-scrollbar-track { background: var(--bg-color); }
         ::-webkit-scrollbar-thumb { background-color: #555; border-radius: 10px; border: 3px solid var(--bg-color); }
         ::-webkit-scrollbar-thumb:hover { background-color: #777; }
-
         .explorer-container { display: flex; flex-direction: column; height: 100%; }
         .header { background: var(--bg-header); border-bottom: 1px solid var(--border-color); }
         .header-tabs { display: flex; padding: 0 12px; position: relative; }
@@ -392,7 +425,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         .col-type { width: 20%; }
         .col-size { width: 10%; }
         .explorer-container.show-checkboxes .col-check { display: table-cell; }
-
         .file-table tr.search-result .path { font-size: 12px; color: var(--text-secondary-color); }
         .file-table tr:hover { background: var(--bg-hover); }
         .file-table tr.selected { background: var(--bg-selection) !important; color: white; }
@@ -569,6 +601,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
     <script>
     document.addEventListener('DOMContentLoaded', () => {
         const getEl = (id) => document.getElementById(id);
+        const addEventListenerIfPresent = (id, event, handler) => {
+            const el = getEl(id);
+            if (el) el.addEventListener(event, handler);
+        };
         const fileListBody = getEl('file-list-body');
         const itemCountEl = getEl('item-count');
         const dragDropOverlay = getEl('drag-drop-overlay');
@@ -591,10 +627,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         const previewContent = getEl('preview-content');
         const explorerContainer = document.querySelector('.explorer-container');
         const contentArea = getEl('content-area');
-
         let currentPath = '/', selectedItems = new Map(), contextMenu = null, isSearchMode = false, favorites = [], currentLayout = 'details';
         const history = { past: [], future: [] };
-
         const ICONS = {
             'back': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L4.81 7.5h8.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06z"/></svg>',
             'forward': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M8.22 3.47a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06l2.97-2.97H2.75a.75.75 0 0 1 0-1.5h8.44L8.22 4.53a.75.75 0 0 1 0-1.06z"/></svg>',
@@ -615,16 +649,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             'details': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M3 15h18v-2H3v2zm0 4h18v-2H3v2zm0-8h18V9H3v2zm0-6v2h18V5H3z"/></svg>',
             'checkboxes': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
         };
-        const addEventListenerIfPresent = (id, event, handler) => {
-            const el = getEl(id);
-            if (el) el.addEventListener(event, handler);
-        };
-        
         Object.keys(ICONS).forEach(id => {
             const el = getEl(`icon-${id}`);
             if (el) el.innerHTML = ICONS[id];
         });
-
         const apiCall = async (action, formData) => {
             try {
                 const response = await fetch(`?action=${action}`, { method: 'POST', body: formData });
@@ -641,7 +669,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 return null;
             }
         };
-
         const updateAddressBar = (path) => {
             addressBar.innerHTML = '';
             const homeIconSvg = '<svg fill="currentColor" viewBox="0 0 16 16" style="width:16px; height:16px; margin-right:4px;"><path d="M8 1.75a.75.75 0 0 1 .53.22l5.25 5.25a.75.75 0 0 1-1.06 1.06L12 7.78V14a.75.75 0 0 1-1.5 0V9h-1v5a.75.75 0 0 1-1.5 0V7.78L4.28 8.53a.75.75 0 0 1-1.06-1.06l5.25-5.25A.75.75 0 0 1 8 1.75z"/></svg>';
@@ -650,7 +677,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             homePart.innerHTML = homeIconSvg;
             homePart.onclick = () => navigateTo('/');
             addressBar.appendChild(homePart);
-
             const parts = path.split('/').filter(p => p);
             let currentBuildPath = '';
             parts.forEach(part => {
@@ -664,7 +690,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 addressBar.appendChild(partEl);
             });
         };
-
         const updateUsage = async () => {
             const data = await apiCall('get_usage', new FormData());
             if(data && data.success) {
@@ -673,7 +698,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 usageText.textContent = `${data.used_formatted} / ${data.total_formatted}`;
             }
         };
-
         const updateSelection = () => {
              document.querySelectorAll('.file-item.selected, .grid-item.selected').forEach(el => el.classList.remove('selected'));
              selectedItems.forEach((_, key) => {
@@ -690,7 +714,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
              const totalItems = fileListBody.querySelectorAll('.file-item').length;
              itemCountEl.textContent = selectedItems.size > 0 ? `${selectedItems.size} 個の項目を選択` : `${totalItems} 項目`;
         };
-
         const navigateTo = (path, fromHistory = false) => {
             if (currentPath === path && !fromHistory) return;
             if (!fromHistory) {
@@ -704,13 +727,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             loadDirectory(path);
             updateNavButtons();
         };
-
         const updateNavButtons = () => {
             navBackBtn.disabled = history.past.length === 0;
             navForwardBtn.disabled = history.future.length === 0;
             navUpBtn.disabled = currentPath === '/';
         };
-
         const renderItems = (files, isSearch = false) => {
             fileListBody.innerHTML = '';
             fileGridView.innerHTML = '';
@@ -727,7 +748,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     row.dataset.name = file.name;
                     row.dataset.isDir = file.is_dir;
                     row.dataset.isSystem = file.is_system;
-
                     let nameCellHTML = `<div class="item-name-container"><span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="item-name">${file.name}</span></div>`;
                     if (isSearch) { nameCellHTML += `<div class="path">${filePath}</div>`; }
                     const checkboxHTML = `<td class="col-check"><input type="checkbox" class="item-checkbox" data-path="${filePath}"></td>`;
@@ -737,7 +757,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                         row.innerHTML = `${checkboxHTML}<td class="col-name">${nameCellHTML}</td><td class="col-modified">${file.modified}</td><td class="col-type">${file.type}</td><td class="col-size">${file.size}</td>`;
                     }
                     fileListBody.appendChild(row);
-
                     const gridItem = document.createElement('div');
                     gridItem.className = 'grid-item';
                     gridItem.dataset.path = filePath;
@@ -746,7 +765,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     gridItem.dataset.isSystem = file.is_system;
                     gridItem.innerHTML = `<span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="name">${file.name}</span>`;
                     fileGridView.appendChild(gridItem);
-
                     [row, gridItem].forEach(el => {
                         el.addEventListener('click', e => handleItemClick(e, file, el));
                         el.addEventListener('dblclick', () => handleItemDblClick(file, filePath));
@@ -756,12 +774,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             }
             updateSelection();
         };
-
         const loadDirectory = async (path) => {
-            const formData = new FormData(); formData.append('action', 'list'); formData.append('path', path);
+            const formData = new FormData(); formData.append('path', path);
             const data = await apiCall('list', formData);
             if (!data || !data.success) { if (path !== '/') navigateTo('/'); return; }
-
             isSearchMode = false;
             addressBar.style.display = 'flex';
             addressInput.style.display = 'none';
@@ -769,13 +785,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             updateAddressBar(data.path);
             renderItems(data.files, false);
             updateUsage();
-
             navPane.querySelectorAll('.nav-item').forEach(item => {
                 if(item.dataset.path === path) item.classList.add('active');
                 else item.classList.remove('active');
             });
         };
-
         const handleItemClick = (e, file, element) => {
             e.stopPropagation();
             hideContextMenu();
@@ -793,7 +807,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             showPreview();
         };
         const handleItemDblClick = (file, path) => { file.is_dir ? navigateTo(path) : downloadFile(path); };
-
         const handleItemContextMenu = (e, file, row) => {
             e.preventDefault();
             e.stopPropagation();
@@ -806,7 +819,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             }
             showContextMenu(e, fileData, row);
         };
-
         const positionMenu = (menu, x, y, parentElement = null) => {
             const menuRect = menu.getBoundingClientRect();
             let newX = x, newY = y;
@@ -822,7 +834,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             if (newX < 0) newX = 5; if (newY < 0) newY = 5;
             menu.style.left = `${newX}px`; menu.style.top = `${newY}px`;
         };
-
         const showContextMenu = (e, fileInfo, element) => {
             hideContextMenu();
             contextMenu = document.createElement('div');
@@ -854,9 +865,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 });
             });
         };
-
         const hideContextMenu = () => { if (contextMenu) contextMenu.remove(); contextMenu = null; };
-
         const handleContextMenuAction = (action, fileInfo, element) => {
             hideContextMenu();
             const itemPath = element ? element.dataset.path : null;
@@ -872,7 +881,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 case 'create_folder': createFolder(); break;
             }
         };
-
         const initiateRename = (rowElement) => {
             const nameContainer = rowElement.querySelector('.item-name-container');
             const nameSpan = nameContainer.querySelector('.item-name');
@@ -894,7 +902,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             input.addEventListener('blur', finishRename); input.addEventListener('keydown', keydownHandler);
             nameContainer.appendChild(input); input.focus(); input.select();
         };
-
         const uploadFiles = async (files, isFolder = false) => {
             const formData = new FormData(); formData.append('path', currentPath);
             const relativePaths = [];
@@ -903,21 +910,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             const result = await apiCall('upload', formData);
             if (result && result.success) loadDirectory(currentPath);
         };
-
         const createFolder = async () => {
             const name = prompt('新しいフォルダ名:', '新しいフォルダー'); if (!name) return;
             const formData = new FormData(); formData.append('action', 'create_folder'); formData.append('path', currentPath); formData.append('name', name);
             const result = await apiCall('create_folder', formData);
             if (result && result.success) loadDirectory(currentPath);
         };
-
         const createNewFile = async () => {
-            const name = prompt('新しいファイル名:', '新規テキストファイル.txt'); if (!name) return;
+            const name = prompt('新しいファイル名:', '新規テキストドキュメント.txt'); if (!name) return;
             const formData = new FormData(); formData.append('action', 'create_file'); formData.append('path', currentPath); formData.append('name', name);
             const result = await apiCall('create_file', formData);
             if (result && result.success) loadDirectory(currentPath);
         };
-
         const deleteItems = async () => {
             if (selectedItems.size === 0 || !confirm(`${selectedItems.size}個の項目を完全に削除しますか？`)) return;
             const itemsToDelete = Array.from(selectedItems.keys()).map(path => ({ path, name: selectedItems.get(path).name }));
@@ -925,26 +929,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             const result = await apiCall('delete', formData);
             if (result && result.success) { selectedItems.clear(); isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath); }
         };
-
         const downloadFile = (filePath) => { window.location.href = `?action=download&file=${encodeURIComponent(filePath)}`; };
-
         const searchFiles = async (term) => {
             const formData = new FormData(); formData.append('action', 'search'); formData.append('query', term);
             const data = await apiCall('search', formData);
             if (data && data.success) { isSearchMode = true; renderItems(data.files, true); }
         };
-
         const loadFavorites = async () => {
-            const formData = new FormData(); formData.append('action', 'get_favorites');
-            const data = await apiCall('get_favorites', formData);
+            const data = await apiCall('get_favorites', new FormData());
             if (data && data.success) { favorites = data.favorites; renderFavorites(); }
         };
-
         const saveFavorites = async () => {
             const formData = new FormData(); formData.append('action', 'save_favorites'); formData.append('favorites', JSON.stringify(favorites));
             await apiCall('save_favorites', formData);
         };
-
         const renderFavorites = () => {
             favoritesListEl.innerHTML = '';
             getEl('favorites-section').style.display = favorites.length === 0 ? 'none' : 'block';
@@ -959,7 +957,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 });
             }
         };
-
         const showFavoriteContextMenu = (e, path) => {
             hideContextMenu();
             contextMenu = document.createElement('div');
@@ -973,7 +970,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 hideContextMenu();
             });
         };
-
         const showViewContextMenu = (e) => {
             hideContextMenu();
             contextMenu = document.createElement('div');
@@ -987,7 +983,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 if (item && !item.classList.contains('has-submenu')) handleContextMenuAction(item.dataset.action, null, null);
             });
         };
-
         const copyToClipboard = (text) => {
             const textArea = document.createElement('textarea');
             textArea.value = text;
@@ -999,13 +994,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             try { document.execCommand('copy'); } catch (err) { console.error('Fallback: Oops, unable to copy', err); }
             document.body.removeChild(textArea);
         };
-
         const addFavorite = (path, name) => {
             if (!favorites.some(fav => fav.path === path)) { favorites.push({ path, name }); saveFavorites(); renderFavorites(); }
         };
-
         const removeFavorite = (path) => { favorites = favorites.filter(fav => fav.path !== path); saveFavorites(); renderFavorites(); };
-
         const showPreview = () => {
             if (!previewPane.classList.contains('active') || selectedItems.size !== 1) {
                 previewContent.innerHTML = ''; previewPlaceholder.textContent = 'プレビューするファイルを選択してください'; previewPlaceholder.style.display = 'block';
@@ -1035,13 +1027,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         addEventListenerIfPresent('rename-btn', 'click', () => { if(selectedItems.size !== 1) return; const path = selectedItems.keys().next().value; const row = fileListBody.querySelector(`tr[data-path="${CSS.escape(path)}"]`); if (row) initiateRename(row); });
 
         document.querySelectorAll('.layout-btn').forEach(btn => btn.addEventListener('click', (e) => {
-            document.querySelector('.layout-btn.active').classList.remove('active');
+            const activeBtn = document.querySelector('.layout-btn.active');
+            if(activeBtn) activeBtn.classList.remove('active');
             const target = e.currentTarget; target.classList.add('active'); currentLayout = target.id === 'large-icons-btn' ? 'grid' : 'details';
             fileTableView.style.display = currentLayout === 'details' ? 'block' : 'none';
             fileGridView.style.display = currentLayout === 'grid' ? 'flex' : 'none';
         }));
         document.querySelectorAll('.header-tabs .tab-item').forEach(tab => tab.addEventListener('click', () => {
-            document.querySelector('.header-tabs .tab-item.active').classList.remove('active'); tab.classList.add('active');
+            const activeTab = document.querySelector('.header-tabs .tab-item.active');
+            if(activeTab) activeTab.classList.remove('active');
+            tab.classList.add('active');
             const targetToolbarId = tab.dataset.toolbar;
             document.querySelectorAll('.toolbar').forEach(toolbar => { toolbar.id === targetToolbarId ? toolbar.classList.add('active') : toolbar.classList.remove('active'); });
         }));
