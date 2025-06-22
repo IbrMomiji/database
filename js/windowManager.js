@@ -32,6 +32,7 @@ class WindowManager {
 
         const iframe = newWindowEl.querySelector('iframe');
         if (iframe) {
+            // iframeのnameを一意にするため、windowIdCounterを使用
             const iframeId = `${type}-iframe-${this.windowIdCounter}`;
             iframe.name = iframeId;
             if (type === 'notepad') {
@@ -87,7 +88,12 @@ class WindowManager {
     _setupMessageListener() {
         window.addEventListener('message', (event) => {
             try {
-                const { type, sourceWindowId, mode, currentPath, filePath, app, windowId } = event.data;
+                // event.dataがオブジェクトでない場合は無視
+                if (typeof event.data !== 'object' || event.data === null) {
+                    return;
+                }
+                
+                const { type, sourceWindowId, mode, currentPath, filePath, app, windowId, title } = event.data;
 
                 if (type === 'openWithApp') {
                     if (app) {
@@ -110,9 +116,30 @@ class WindowManager {
                         sourceIframe.contentWindow.postMessage({ type, filePath, mode, sourceWindowId }, '*');
                     }
                 }
+                // [MODIFIED] ウィンドウタイトル設定の処理を追加
+                else if (type === 'setWindowTitle') {
+                    // メッセージの送信元(event.source)から、対応するウィンドウを検索
+                    for (const [id, win] of this.windows.entries()) {
+                        const iframe = win.el.querySelector('iframe');
+                        if (iframe && iframe.contentWindow === event.source) {
+                             const titleEl = win.el.querySelector('.window-title');
+                             if (titleEl && title) {
+                                 titleEl.textContent = title;
+                             }
+                            break;
+                        }
+                    }
+                }
                 else if (type === 'closeChildWindow' && windowId) {
-                    let parentWinId = windowId.replace(/^.*-iframe-/, 'window-');
-                    this.closeWindow(parentWinId);
+                    // 'notepad-iframe-1' のような名前から 'window-X' を直接見つけるのは困難なため、
+                    // 送信元を特定して閉じる方法がより堅牢です。
+                    for (const [id, win] of this.windows.entries()) {
+                         const iframe = win.el.querySelector('iframe');
+                         if(iframe && iframe.name === windowId){
+                             this.closeWindow(id);
+                             break;
+                         }
+                    }
                 }
             } catch (error) {
                 alert(`ウィンドウ操作中にエラーが発生しました:\n${error.message}`);

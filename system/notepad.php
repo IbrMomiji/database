@@ -168,7 +168,7 @@ if (isset($_GET['action'])) {
     <title>Notepad</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
     <style>
-        /* --- Combined CSS from main.css and notepad.php --- */
+        /* --- CSSは変更なし --- */
         :root {
             --bg-main: #FFFFFF;
             --bg-menu: #F0F0F0;
@@ -617,12 +617,14 @@ if (isset($_GET['action'])) {
             const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '無題';
             const newTitle = `${dirtyMarker}${fileName} - メモ帳`;
             try {
+                // [MODIFIED] windowIdプロパティを削除し、より堅牢な方法に変更
                 window.parent.postMessage({
                     type: 'setWindowTitle',
-                    windowId: myWindowId.replace('-iframe', ''),
                     title: newTitle
                 }, '*');
-            } catch (e) {}
+            } catch (e) {
+                console.error("Failed to post message to parent:", e);
+            }
         };
         const updateStatus = () => {
             const text = textArea.value;
@@ -972,6 +974,9 @@ if (isset($_GET['action'])) {
                     if (mode === 'open') {
                         confirmAndSaveIfNeeded(() => loadFile(filePath));
                     } else if (mode === 'save') {
+                        // ファイル名を更新してから保存
+                        currentFilePath = filePath;
+                        updateTitle();
                         saveFile(filePath);
                     }
                 }

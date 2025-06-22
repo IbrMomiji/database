@@ -167,6 +167,10 @@ if (isset($_GET['action'])) {
         --button-border: #ADADAD;
         --button-hover-bg: #E5F1FB;
         --button-hover-border: #0078D7;
+        /* 右クリックでフォーカスしたアイテム用の色を追加 */
+        --selection-bg-inactive: #D4D4D4;
+        --selection-text-inactive: #000000;
+        --menu-highlight-bg: #D6E8F9;
     }
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: 'Yu Gothic UI', 'Segoe UI', Meiryo, system-ui, sans-serif; font-size: 13px; background: var(--bg-secondary); }
     .dialog-container { display: flex; flex-direction: column; height: 100%; }
@@ -178,6 +182,9 @@ if (isset($_GET['action'])) {
     .file-table td { padding: 4px 8px; white-space: nowrap; cursor: default; }
     .file-table tr:hover { background: #EAF2FB; }
     .file-table tr.selected { background: var(--selection-bg); color: var(--selection-text); }
+    /* 右クリック時の選択色 */
+    .file-table tr.context-selected { background: var(--selection-bg); color: var(--selection-text); }
+    
     .item-name-container input { width: 95%; border: 1px solid var(--selection-bg); outline: none; font: inherit; }
 
     .footer { padding: 12px; display: grid; grid-template-columns: 80px 1fr auto; grid-template-rows: auto auto; gap: 8px; align-items: center; flex-shrink: 0; }
@@ -406,6 +413,19 @@ document.addEventListener('DOMContentLoaded', () => {
         hideContextMenu();
         
         const targetRow = e.target.closest('tr');
+
+        // [MODIFIED] 右クリックされた行を選択状態にする
+        // すべての行から選択クラスを削除
+        document.querySelectorAll('.file-table tr.selected').forEach(r => r.classList.remove('selected'));
+        // 右クリックされた行が存在すれば選択クラスを追加
+        if (targetRow) {
+            targetRow.classList.add('selected');
+            // もしファイルなら、ファイル名入力欄にも反映
+            if (targetRow.dataset.type === 'file') {
+                filenameInput.value = targetRow.dataset.name;
+            }
+        }
+        
         contextMenu = document.createElement('div');
         contextMenu.className = 'context-menu';
 
@@ -471,7 +491,16 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    document.addEventListener('click', hideContextMenu);
+    document.addEventListener('click', (e) => {
+        // コンテキストメニューの外側をクリックした場合は非表示にする
+        if (contextMenu && !contextMenu.contains(e.target)) {
+            hideContextMenu();
+        }
+        // ファイルリストの外側をクリックした場合は選択を解除
+        if (!mainContent.contains(e.target)) {
+             document.querySelectorAll('.file-table tr.selected').forEach(r => r.classList.remove('selected'));
+        }
+    });
     
     renderFiles(initialPath ? ('/' + initialPath.split('/').slice(0, -1).join('/')) : '/');
 });
