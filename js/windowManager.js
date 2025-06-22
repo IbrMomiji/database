@@ -32,7 +32,6 @@ class WindowManager {
 
         const iframe = newWindowEl.querySelector('iframe');
         if (iframe) {
-            // iframeのnameを一意にするため、windowIdCounterを使用
             const iframeId = `${type}-iframe-${this.windowIdCounter}`;
             iframe.name = iframeId;
             if (type === 'notepad') {
@@ -40,14 +39,16 @@ class WindowManager {
                 if (options.filePath) {
                     params.append('file', options.filePath);
                 }
-                iframe.src = `system/notepad.php?${params.toString()}`;
+                iframe.src = `system/application/notepad.php?${params.toString()}`;
+            } else if (type === 'explorer') { // エクスプローラーのパスを追加
+                 iframe.src = `system/application/explorer.php`;
             } else if (type === 'file_explorer_dialog') {
                 const params = new URLSearchParams({
                     source: options.sourceWindowId,
                     mode: options.mode,
                     path: options.currentPath || ''
                 });
-                iframe.src = `system/file-explorer-dialog.php?${params.toString()}`;
+                iframe.src = `system/application/file-explorer-dialog.php?${params.toString()}`;
                 newWindowEl.querySelector('.window-title').textContent = options.mode === 'open' ? 'ファイルを開く' : '名前を付けて保存';
                 newWindowEl.style.width = '580px';
                 newWindowEl.style.height = '420px';
@@ -88,7 +89,6 @@ class WindowManager {
     _setupMessageListener() {
         window.addEventListener('message', (event) => {
             try {
-                // event.dataがオブジェクトでない場合は無視
                 if (typeof event.data !== 'object' || event.data === null) {
                     return;
                 }
@@ -116,9 +116,7 @@ class WindowManager {
                         sourceIframe.contentWindow.postMessage({ type, filePath, mode, sourceWindowId }, '*');
                     }
                 }
-                // [MODIFIED] ウィンドウタイトル設定の処理を追加
                 else if (type === 'setWindowTitle') {
-                    // メッセージの送信元(event.source)から、対応するウィンドウを検索
                     for (const [id, win] of this.windows.entries()) {
                         const iframe = win.el.querySelector('iframe');
                         if (iframe && iframe.contentWindow === event.source) {
@@ -131,8 +129,6 @@ class WindowManager {
                     }
                 }
                 else if (type === 'closeChildWindow' && windowId) {
-                    // 'notepad-iframe-1' のような名前から 'window-X' を直接見つけるのは困難なため、
-                    // 送信元を特定して閉じる方法がより堅牢です。
                     for (const [id, win] of this.windows.entries()) {
                          const iframe = win.el.querySelector('iframe');
                          if(iframe && iframe.name === windowId){

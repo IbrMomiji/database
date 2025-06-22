@@ -7,7 +7,7 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-define('NOTEPAD_USER_BASE_DIR', __DIR__ . '/../user');
+define('NOTEPAD_USER_BASE_DIR', __DIR__ . '/../../user');
 define('SETTINGS_DIR', '.settings');
 define('NOTEPAD_SETTINGS_FILE', SETTINGS_DIR . '/.notepad.json');
 
@@ -168,7 +168,6 @@ if (isset($_GET['action'])) {
     <title>Notepad</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism.min.css">
     <style>
-        /* --- CSSは変更なし --- */
         :root {
             --bg-main: #FFFFFF;
             --bg-menu: #F0F0F0;
@@ -617,7 +616,6 @@ if (isset($_GET['action'])) {
             const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '無題';
             const newTitle = `${dirtyMarker}${fileName} - メモ帳`;
             try {
-                // [MODIFIED] windowIdプロパティを削除し、より堅牢な方法に変更
                 window.parent.postMessage({
                     type: 'setWindowTitle',
                     title: newTitle
@@ -974,7 +972,6 @@ if (isset($_GET['action'])) {
                     if (mode === 'open') {
                         confirmAndSaveIfNeeded(() => loadFile(filePath));
                     } else if (mode === 'save') {
-                        // ファイル名を更新してから保存
                         currentFilePath = filePath;
                         updateTitle();
                         saveFile(filePath);

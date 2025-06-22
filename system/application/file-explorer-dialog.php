@@ -3,7 +3,7 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-define('FILEDIALOG_USER_BASE_DIR', __DIR__ . '/../user');
+define('FILEDIALOG_USER_BASE_DIR', __DIR__ . '/../../user');
 define('SETTINGS_DIR', '.settings');
 
 if (!isset($_SESSION['username'])) {
@@ -18,17 +18,14 @@ function getSafePath_Dialog($baseDir, $path) {
     $path = '/' . ltrim($path, '/');
     $realBaseDir = realpath($baseDir);
     
-    // Prevent directory traversal
     if (strpos($path, '..') !== false) {
         return false;
     }
 
     $fullPath = $realBaseDir . $path;
     
-    // Normalize the path to prevent issues
     $finalPath = realpath($fullPath);
     if ($finalPath === false) {
-        // If path doesn't exist, check parent
         $parent = dirname($fullPath);
         if(!is_dir($parent)) return false;
         $finalPath = realpath($parent) . '/' . basename($fullPath);
@@ -167,7 +164,6 @@ if (isset($_GET['action'])) {
         --button-border: #ADADAD;
         --button-hover-bg: #E5F1FB;
         --button-hover-border: #0078D7;
-        /* 右クリックでフォーカスしたアイテム用の色を追加 */
         --selection-bg-inactive: #D4D4D4;
         --selection-text-inactive: #000000;
         --menu-highlight-bg: #D6E8F9;
@@ -182,7 +178,6 @@ if (isset($_GET['action'])) {
     .file-table td { padding: 4px 8px; white-space: nowrap; cursor: default; }
     .file-table tr:hover { background: #EAF2FB; }
     .file-table tr.selected { background: var(--selection-bg); color: var(--selection-text); }
-    /* 右クリック時の選択色 */
     .file-table tr.context-selected { background: var(--selection-bg); color: var(--selection-text); }
     
     .item-name-container input { width: 95%; border: 1px solid var(--selection-bg); outline: none; font: inherit; }
@@ -414,13 +409,9 @@ document.addEventListener('DOMContentLoaded', () => {
         
         const targetRow = e.target.closest('tr');
 
-        // [MODIFIED] 右クリックされた行を選択状態にする
-        // すべての行から選択クラスを削除
         document.querySelectorAll('.file-table tr.selected').forEach(r => r.classList.remove('selected'));
-        // 右クリックされた行が存在すれば選択クラスを追加
         if (targetRow) {
             targetRow.classList.add('selected');
-            // もしファイルなら、ファイル名入力欄にも反映
             if (targetRow.dataset.type === 'file') {
                 filenameInput.value = targetRow.dataset.name;
             }
@@ -492,11 +483,9 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     document.addEventListener('click', (e) => {
-        // コンテキストメニューの外側をクリックした場合は非表示にする
         if (contextMenu && !contextMenu.contains(e.target)) {
             hideContextMenu();
         }
-        // ファイルリストの外側をクリックした場合は選択を解除
         if (!mainContent.contains(e.target)) {
              document.querySelectorAll('.file-table tr.selected').forEach(r => r.classList.remove('selected'));
         }

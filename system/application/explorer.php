@@ -3,7 +3,7 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-define('USER_BASE_DIR', __DIR__ . '/../user');
+define('USER_BASE_DIR', __DIR__ . '/../../user');
 define('SETTINGS_DIR', '.settings');
 define('FAVORITES_FILE', SETTINGS_DIR . '/.favorites.json');
 define('MAX_STORAGE_MB', 100);
@@ -27,7 +27,6 @@ $user_dir = USER_BASE_DIR . '/' . $username;
 if (!is_dir($user_dir)) {
     mkdir($user_dir, 0777, true);
 }
-// Create settings directory if it doesn't exist
 $settings_path = $user_dir . '/' . SETTINGS_DIR;
 if (!is_dir($settings_path)) {
     mkdir($settings_path, 0777, true);
@@ -41,7 +40,6 @@ function getDirectorySize($dir) {
     try {
         $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS | FilesystemIterator::CURRENT_AS_FILEINFO));
         foreach ($iterator as $file) {
-            // Exclude settings directory from size calculation
             if (strpos($file->getPathname(), realpath($GLOBALS['user_dir'] . '/' . SETTINGS_DIR)) === 0) {
                 continue;
             }
@@ -141,11 +139,11 @@ if (isset($_GET['action'])) {
                     clearstatcache(true, $item_path);
                     $is_dir = is_dir($item_path);
                     $is_system = ($item === SETTINGS_DIR);
-                    $files[] = [ 
-                        'name' => $item, 
-                        'is_dir' => $is_dir, 
-                        'type' => getFileType($item_path), 
-                        'size' => $is_dir ? '' : formatBytes(filesize($item_path)), 
+                    $files[] = [
+                        'name' => $item,
+                        'is_dir' => $is_dir,
+                        'type' => getFileType($item_path),
+                        'size' => $is_dir ? '' : formatBytes(filesize($item_path)),
                         'modified' => date('Y/m/d H:i', filemtime($item_path)),
                         'is_system' => $is_system
                     ];
@@ -197,7 +195,7 @@ if (isset($_GET['action'])) {
                 if (!mkdir($new_folder_path, 0777, true)) throw new Exception('フォルダの作成に失敗しました。');
                 echo json_encode(['success' => true, 'message' => 'フォルダを作成しました。']);
                 break;
-            
+
             case 'create_file':
                 $file_name = $_POST['name'] ?? '';
                 if (empty($file_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $file_name)) throw new Exception('無効なファイル名です。');
@@ -234,7 +232,7 @@ if (isset($_GET['action'])) {
                 }
                 echo json_encode(['success' => true, 'message' => 'アイテムを削除しました。']);
                 break;
-            
+
             case 'get_favorites':
                 $fav_file = $user_dir . '/' . FAVORITES_FILE;
                 if (file_exists($fav_file)) {
@@ -244,7 +242,7 @@ if (isset($_GET['action'])) {
                     echo json_encode(['success' => true, 'favorites' => []]);
                 }
                 break;
-            
+
             case 'save_favorites':
                 $favorites = json_decode($_POST['favorites'] ?? '[]', true);
                 if (json_last_error() !== JSON_ERROR_NONE) {
@@ -303,7 +301,7 @@ if (isset($_GET['action'])) {
         .tab-item { padding: 10px 16px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
         .tab-item.active { border-bottom-color: var(--accent-color); font-weight: 500; }
         .tab-item:not(.active):hover { background: var(--bg-hover); }
-        
+
         .toolbar { display: none; align-items: stretch; gap: 1px; padding: 8px 12px; background: #202020; border-bottom: 1px solid var(--border-color); }
         .toolbar.active { display: flex; }
         .ribbon-group { display: flex; flex-direction: column; align-items: center; padding: 0 12px; }
@@ -407,7 +405,7 @@ if (isset($_GET['action'])) {
             border-radius: 4px; outline: none; flex-grow: 1;
         }
         .file-table .icon { width: 20px; height: 20px; flex-shrink: 0; }
-        
+
         #preview-pane {
             display: none; width: 300px; flex-shrink: 0;
             border-left: 1px solid var(--border-color);
@@ -586,7 +584,7 @@ if (isset($_GET['action'])) {
               fileTableView = getEl('file-table-view'), fileGridView = getEl('file-grid-view'),
               previewPane = getEl('preview-pane'), previewPlaceholder = getEl('preview-placeholder'), previewContent = getEl('preview-content'),
               explorerContainer = document.querySelector('.explorer-container'), contentArea = getEl('content-area');
-              
+
         let currentPath = '/', selectedItems = new Map(), contextMenu = null, isSearchMode = false, favorites = [], currentLayout = 'details';
         const history = { past: [], future: [] };
 
@@ -610,12 +608,12 @@ if (isset($_GET['action'])) {
             'details': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M3 15h18v-2H3v2zm0 4h18v-2H3v2zm0-8h18V9H3v2zm0-6v2h18V5H3z"/></svg>',
             'checkboxes': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
         };
-        
+
         Object.keys(ICONS).forEach(id => {
             const el = getEl(`icon-${id}`);
             if (el) el.innerHTML = ICONS[id];
         });
-        
+
         const apiCall = async (action, formData) => {
             try {
                 const response = await fetch(`?action=${action}`, { method: 'POST', body: formData });
@@ -653,7 +651,7 @@ if (isset($_GET['action'])) {
                 addressBar.appendChild(partEl);
             });
         };
-        
+
         const updateUsage = async () => {
             const data = await apiCall('get_usage', new FormData());
             if(data && data.success) {
@@ -662,7 +660,7 @@ if (isset($_GET['action'])) {
                 usageText.textContent = `${data.used_formatted} / ${data.total_formatted}`;
             }
         };
-        
+
         const updateSelection = () => {
              document.querySelectorAll('.file-item.selected, .grid-item.selected').forEach(el => el.classList.remove('selected'));
              selectedItems.forEach((_, key) => {
@@ -716,9 +714,9 @@ if (isset($_GET['action'])) {
 
                     let nameCellHTML = `<div class="item-name-container"><span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="item-name">${file.name}</span></div>`;
                     if (isSearch) { nameCellHTML += `<div class="path">${filePath}</div>`; }
-                    
+
                     const checkboxHTML = `<td class="col-check"><input type="checkbox" class="item-checkbox" data-path="${filePath}"></td>`;
-                    
+
                     if (file.is_system) {
                         row.innerHTML = `${checkboxHTML}<td class="col-name">${nameCellHTML}</td><td class="col-modified"></td><td class="col-type"><span style="color: var(--text-secondary-color);">SYSTEM FILE</span></td><td class="col-size"></td>`;
                     } else {
@@ -735,7 +733,7 @@ if (isset($_GET['action'])) {
                     gridItem.dataset.isSystem = file.is_system;
                     gridItem.innerHTML = `<span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="name">${file.name}</span>`;
                     fileGridView.appendChild(gridItem);
-                    
+
                     [row, gridItem].forEach(el => {
                         el.addEventListener('click', e => handleItemClick(e, file, el));
                         el.addEventListener('dblclick', () => handleItemDblClick(file, filePath));
@@ -750,7 +748,7 @@ if (isset($_GET['action'])) {
             const formData = new FormData(); formData.append('path', path);
             const data = await apiCall('list', formData);
             if (!data || !data.success) { if (path !== '/') navigateTo('/'); return; }
-            
+
             isSearchMode = false;
             addressBar.style.display = 'flex';
             addressInput.style.display = 'none';
@@ -783,7 +781,7 @@ if (isset($_GET['action'])) {
             showPreview();
         };
         const handleItemDblClick = (file, path) => { file.is_dir ? navigateTo(path) : downloadFile(path); };
-        
+
         const handleItemContextMenu = (e, file, row) => {
             e.preventDefault();
             e.stopPropagation();
@@ -801,7 +799,7 @@ if (isset($_GET['action'])) {
             const menuRect = menu.getBoundingClientRect();
             let newX = x;
             let newY = y;
-            
+
             if (parentElement) {
                 const parentRect = parentElement.getBoundingClientRect();
                 newX = parentRect.right;
@@ -817,22 +815,22 @@ if (isset($_GET['action'])) {
             if (newY + menuRect.height > window.innerHeight) {
                 newY = window.innerHeight - menuRect.height - 5;
             }
-            
+
             if (newX < 0) newX = 5;
             if (newY < 0) newY = 5;
-            
+
             menu.style.left = `${newX}px`;
             menu.style.top = `${newY}px`;
         };
-        
+
         const showContextMenu = (e, fileInfo, element) => {
             hideContextMenu();
             contextMenu = document.createElement('div');
             contextMenu.className = 'context-menu';
             document.body.appendChild(contextMenu);
-        
+
             let menuItemsHTML = '';
-            
+
             if(fileInfo.is_system) {
                 menuItemsHTML += `<div class="context-menu-item" data-action="open"><span class="label">開く</span></div>`;
             } else {
@@ -848,7 +846,7 @@ if (isset($_GET['action'])) {
                         </div>
                     `;
                 }
-                
+
                 if (fileInfo.is_dir) {
                     const isFavorite = favorites.some(fav => fav.path === element.dataset.path);
                     const favoriteActionText = isFavorite ? 'お気に入りから削除' : 'お気に入りに追加';
@@ -861,9 +859,9 @@ if (isset($_GET['action'])) {
                                    <div class="context-menu-item" data-action="rename"><span class="label">名前の変更</span></div>`;
             }
             contextMenu.innerHTML = menuItemsHTML;
-            
+
             positionMenu(contextMenu, e.clientX, e.clientY);
-        
+
             contextMenu.addEventListener('click', ev => {
                 const item = ev.target.closest('.context-menu-item');
                 if (item && !item.classList.contains('has-submenu')) {
@@ -879,7 +877,7 @@ if (isset($_GET['action'])) {
                 });
             });
         };
-        
+
         const hideContextMenu = () => {
             if (contextMenu) {
                 contextMenu.remove();
@@ -924,12 +922,12 @@ if (isset($_GET['action'])) {
                     break;
             }
         };
-        
+
         const initiateRename = (rowElement) => {
             const nameContainer = rowElement.querySelector('.item-name-container');
             const nameSpan = nameContainer.querySelector('.item-name');
             if (!nameSpan || nameContainer.querySelector('input')) return;
-            
+
             const oldName = nameSpan.textContent;
             nameSpan.style.display = 'none';
             const input = document.createElement('input');
@@ -967,7 +965,7 @@ if (isset($_GET['action'])) {
             input.focus();
             input.select();
         };
-        
+
         const uploadFiles = async (files, isFolder = false) => {
             const formData = new FormData();
             formData.append('path', currentPath);
@@ -1010,7 +1008,7 @@ if (isset($_GET['action'])) {
                 loadDirectory(currentPath);
             }
         };
-        
+
         const deleteItems = async () => {
             if (selectedItems.size === 0 || !confirm(`${selectedItems.size}個の項目を完全に削除しますか？`)) return;
             const itemsToDelete = Array.from(selectedItems.keys()).map(path => ({ path }));
@@ -1026,7 +1024,7 @@ if (isset($_GET['action'])) {
         const downloadFile = (filePath) => {
             window.location.href = `?action=download&file=${encodeURIComponent(filePath)}`;
         };
-        
+
         const searchFiles = async (term) => {
             const formData = new FormData();
             formData.append('query', term);
@@ -1036,7 +1034,7 @@ if (isset($_GET['action'])) {
                 renderItems(data.files, true);
             }
         };
-        
+
         const loadFavorites = async () => {
             const data = await apiCall('get_favorites', new FormData());
             if (data && data.success) {
@@ -1050,7 +1048,7 @@ if (isset($_GET['action'])) {
             formData.append('favorites', JSON.stringify(favorites));
             await apiCall('save_favorites', formData);
         };
-        
+
         const renderFavorites = () => {
             favoritesListEl.innerHTML = '';
             if (favorites.length === 0) {
@@ -1079,7 +1077,7 @@ if (isset($_GET['action'])) {
             contextMenu.className = 'context-menu';
             document.body.appendChild(contextMenu);
             contextMenu.innerHTML = `<div class="context-menu-item" data-action="remove_favorite"><span class="label">お気に入りから削除</span></div>`;
-            
+
             positionMenu(contextMenu, e.clientX, e.clientY);
 
             contextMenu.addEventListener('click', (ev) => {
@@ -1090,7 +1088,7 @@ if (isset($_GET['action'])) {
                 hideContextMenu();
             });
         };
-        
+
         const showViewContextMenu = (e) => {
             hideContextMenu();
             contextMenu = document.createElement('div');
@@ -1148,7 +1146,7 @@ if (isset($_GET['action'])) {
                 renderFavorites();
             }
         };
-        
+
         const removeFavorite = (path) => {
             favorites = favorites.filter(fav => fav.path !== path);
             saveFavorites();
@@ -1167,7 +1165,7 @@ if (isset($_GET['action'])) {
             const ext = filePath.split('.').pop().toLowerCase();
             const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp'];
             const videoExts = ['mp4', 'webm', 'ogg'];
-            
+
             previewPlaceholder.style.display = 'none';
             previewContent.innerHTML = '';
 
@@ -1197,7 +1195,7 @@ if (isset($_GET['action'])) {
             e.currentTarget.classList.toggle('active');
             explorerContainer.classList.toggle('show-checkboxes');
         });
-        
+
         document.querySelectorAll('.layout-btn').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 document.querySelector('.layout-btn.active').classList.remove('active');
@@ -1208,7 +1206,7 @@ if (isset($_GET['action'])) {
                 fileGridView.style.display = currentLayout === 'grid' ? 'flex' : 'none';
             });
         });
-        
+
         document.querySelectorAll('.header-tabs .tab-item').forEach(tab => {
             tab.addEventListener('click', () => {
                 document.querySelector('.header-tabs .tab-item.active').classList.remove('active');
@@ -1238,7 +1236,7 @@ if (isset($_GET['action'])) {
                 navigateTo(history.future.shift(), true);
             }
         });
-        
+
         navUpBtn.addEventListener('click', () => { if (currentPath !== '/') navigateTo(currentPath.substring(0, currentPath.lastIndexOf('/')) || '/'); });
         fileInput.addEventListener('change', (e) => uploadFiles(e.target.files, false));
         folderInput.addEventListener('change', (e) => uploadFiles(e.target.files, true));
@@ -1263,7 +1261,7 @@ if (isset($_GET['action'])) {
             item.addEventListener('click', () => navigateTo(item.dataset.path));
         });
         getEl('nav-home').addEventListener('click', () => navigateTo('/'));
-        
+
         const body = document.body;
         body.addEventListener('dragenter', (e) => { e.preventDefault(); dragDropOverlay.classList.add('visible'); });
         body.addEventListener('dragover', (e) => { e.preventDefault(); });
@@ -1277,7 +1275,7 @@ if (isset($_GET['action'])) {
             dragDropOverlay.classList.remove('visible');
             uploadFiles(e.dataTransfer.files, false);
         });
-        
+
         contentArea.addEventListener('contextmenu', (e) => {
             if (e.target.closest('.file-item') || e.target.closest('.grid-item')) return;
             e.preventDefault();
