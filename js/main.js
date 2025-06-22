@@ -40,7 +40,6 @@ class App {
         }
 
         window.addEventListener('keydown', (e) => {
-            // --- 1. ウィンドウスイッチャーやコンテキストメニューの表示中は、他の処理を中断 ---
             if (e.altKey && e.key.toLowerCase() === 'w') {
                 e.preventDefault();
                 if (!this.windowSwitcher.isVisible) {
@@ -56,37 +55,33 @@ class App {
                     e.preventDefault();
                     this.windowSwitcher.hide();
                 }
-                return; // スイッチャー表示中は他のキーを無効化
+                return;
             }
             if (this.contextMenu.isVisible()) {
                 this.contextMenu.handleKeyPress(e);
                 return;
             }
 
-            // --- 2. 現在フォーカスされている場所がテキスト入力欄かどうかを判定 ---
             let isTextInput = false;
             const activeEl = document.activeElement;
             if (activeEl) {
                 if (activeEl.tagName === 'IFRAME') {
-                    // iframe内にフォーカスがある場合、安全策として入力中とみなす
                     try {
                         const iframeActiveEl = activeEl.contentWindow.document.activeElement;
                         if (iframeActiveEl) {
                             isTextInput = ['INPUT', 'TEXTAREA'].includes(iframeActiveEl.tagName) || iframeActiveEl.isContentEditable;
                         }
                     } catch (err) {
-                        isTextInput = true; // アクセスできない場合は入力中と判断
+                        isTextInput = true;
                     }
                 } else {
                     isTextInput = ['INPUT', 'TEXTAREA'].includes(activeEl.tagName);
                 }
             }
             
-            // --- 3. テキスト入力中でなければ、ウィンドウ操作のショートカットを処理 ---
             if (!isTextInput) {
                 const topWindow = this.windowManager.getTopWindow();
 
-                // a. ウィンドウ操作 (Ctrl + 矢印)
                 if (e.ctrlKey && ['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
                     if (topWindow) {
                         e.preventDefault();
@@ -95,7 +90,6 @@ class App {
                         if (e.key === 'ArrowRight') this.windowManager.snapWindow(topWindow.id, 'right');
                     }
                 }
-                // b. デスクトップへの文字入力 -> コンソールへフォーカス
                 else if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
                     const topConsole = this.windowManager.getTopmostConsole();
                     if (topConsole) {

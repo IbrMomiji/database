@@ -201,11 +201,17 @@ class WindowManager {
         const winData = this.windows.get(id);
         const tab = this.minimizedArea.querySelector(`.minimized-tab[data-window-id="${id}"]`);
 
-        if (winData && tab) {
-            winData.state = 'normal';
-            winData.el.style.display = '';
-            this.focus(id);
+        if (!winData || winData.state !== 'minimized') return;
+
+        winData.state = 'normal';
+        winData.el.style.display = '';
+        this.zOrder.push(id);
+
+        if (tab) {
+            tab.remove();
         }
+
+        this.focus(id);
     }
 
     toggleMaximize(id) {
@@ -455,7 +461,6 @@ class WindowManager {
         return this.windows.get(topWindowId) || null;
     }
 
-    // --- Added: 一番手前のコンソールを探すメソッド ---
     getTopmostConsole() {
         for (let i = this.zOrder.length - 1; i >= 0; i--) {
             const winId = this.zOrder[i];

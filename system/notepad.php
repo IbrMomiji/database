@@ -143,7 +143,6 @@ if (isset($_GET['action'])) {
         }
     } catch (Exception $e) {
         $code = ($e instanceof \InvalidArgumentException || $e instanceof \RuntimeException) && $e->getCode() >= 400 && $e->getCode() < 600 ? $e->getCode() : 500;
-        http_response_code($code);
 
         error_log(
             sprintf(
@@ -156,6 +155,7 @@ if (isset($_GET['action'])) {
             )
         );
 
+        http_response_code($code);
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
     }
     exit;
@@ -552,7 +552,7 @@ if (isset($_GET['action'])) {
                     <input type="text" id="font-family-input" autocomplete="off">
                     <div class="font-family-list" id="font-family-list"></div>
                 </div>
-                <div><label for="font-style">スタイル:</label><select id="font-style-select"><option value="normal">標準</option><option value="italic">斜体</option><option value="bold">太字</option><option value="bold italic">太字 斜体</option></select></div>
+                <div><label for="font-style">スタイル:</label><select id="font-style-select"><option value="normal">標準</option><option value="italic">斜体</option><option value="bold">太字</option></select></div>
                 <div><label for="font-size">サイズ:</label><input type="number" id="font-size-input" value="15" step="1"></div>
             </div>
             <fieldset class="font-preview"><legend>プレビュー</legend><div id="font-preview-text">AaBbYyZz あいうえお</div></fieldset>
@@ -617,8 +617,11 @@ if (isset($_GET['action'])) {
             const fileName = currentFilePath ? currentFilePath.split(/[\\/]/).pop() : '無題';
             const newTitle = `${dirtyMarker}${fileName} - メモ帳`;
             try {
-                const parentWindowEl = window.parent.document.querySelector(`#${myWindowId.replace('-iframe', '')}`);
-                if (parentWindowEl) parentWindowEl.querySelector('.window-title').textContent = newTitle;
+                window.parent.postMessage({
+                    type: 'setWindowTitle',
+                    windowId: myWindowId.replace('-iframe', ''),
+                    title: newTitle
+                }, '*');
             } catch (e) {}
         };
         const updateStatus = () => {
