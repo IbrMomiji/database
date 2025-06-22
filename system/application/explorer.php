@@ -47,46 +47,35 @@ if (!is_dir($settings_path)) {
 }
 
 function getSafePath($baseDir, $path) {
-    $path = str_replace(chr(0), '', $path);
     $path = str_replace('\\', '/', $path);
+    $path = '/' . trim($path, '/');
     $parts = explode('/', $path);
     $safeParts = [];
     foreach ($parts as $part) {
-        if ($part === '' || $part === '.') {
-            continue;
-        }
+        if ($part === '.' || $part === '') continue;
         if ($part === '..') {
-            if (count($safeParts) > 0) {
-                array_pop($safeParts);
-            }
+            if (!empty($safeParts)) array_pop($safeParts);
         } else {
-            $safeParts[] = $part;
+            $part = preg_replace('/[\\\\\/:\*\?"<>|]/', '', $part);
+            if($part !== '') $safeParts[] = $part;
         }
     }
-    $fullPath = rtrim($baseDir, '/') . '/' . implode('/', $safeParts);
+    $finalPath = $baseDir . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $safeParts);
     $realBaseDir = realpath($baseDir);
     if ($realBaseDir === false) {
+        error_log("Explorer Critical Error: Base directory not found or inaccessible: " . $baseDir);
         return false;
     }
-
-    $checkPath = $fullPath;
-    if (!file_exists($checkPath)) {
-        $checkPath = dirname($checkPath);
+    $realFinalPath = realpath($finalPath);
+    if ($realFinalPath !== false) {
+        if (strpos($realFinalPath, $realBaseDir) !== 0) return false;
+        return $realFinalPath;
+    } else {
+        $parentDir = dirname($finalPath);
+        $realParentPath = realpath($parentDir);
+        if ($realParentPath === false || strpos($realParentPath, $realBaseDir) !== 0) return false;
+        return $realParentPath . DIRECTORY_SEPARATOR . basename($finalPath);
     }
-    
-    $realCheckPath = realpath($checkPath);
-    if ($realCheckPath === false) {
-        if (is_writable($baseDir)) {
-             return $fullPath;
-        }
-        return false;
-    }
-
-    if (strpos($realCheckPath, $realBaseDir) !== 0) {
-        return false;
-    }
-
-    return $fullPath;
 }
 
 function getDirectorySize($dir) {
@@ -163,7 +152,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 foreach ($items as $item) {
                     if ($item === '.' || $item === '..') continue;
-                    $item_path = $safe_path . '/' . $item;
+                    $item_path = $safe_path . DIRECTORY_SEPARATOR . $item;
                     clearstatcache(true, $item_path);
                     $is_dir = is_dir($item_path);
                     $is_system = ($item === SETTINGS_DIR);
@@ -181,6 +170,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     return strcasecmp($a['name'], $b['name']);
                 });
                 echo json_encode(['success' => true, 'path' => $path, 'files' => $files]);
+                break;
+            
+            case 'move':
+                $items_to_move = json_decode($_POST['items'] ?? '[]', true);
+                $destination_path = $_POST['destination'] ?? '';
+                if (empty($items_to_move) || empty($destination_path)) {
+                    throw new Exception('移動するアイテムまたは移動先が指定されていません。');
+                }
+            
+                $dest_dir_path = getSafePath($user_dir, $destination_path);
+                if ($dest_dir_path === false || !is_dir($dest_dir_path)) {
+                    throw new Exception('無効な移動先ディレクトリです。');
+                }
+            
+                $errors = [];
+                foreach ($items_to_move as $item) {
+                    $source_path = getSafePath($user_dir, $item['path']);
+                    if ($source_path === false || !file_exists($source_path)) {
+                        $errors[] = "'{$item['name']}' が見つかりません。";
+                        continue;
+                    }
+            
+                    if (basename($source_path) === SETTINGS_DIR) {
+                        continue; 
+                    }
+            
+                    $new_path = $dest_dir_path . DIRECTORY_SEPARATOR . basename($source_path);
+            
+                    if (strpos($dest_dir_path, $source_path) === 0) {
+                        $errors[] = "自分自身の中に '{$item['name']}' を移動することはできません。";
+                        continue;
+                    }
+            
+                    if (realpath($source_path) == realpath($new_path)) {
+                        continue; // 同じ場所への移動はスキップ
+                    }
+
+                    if (file_exists($new_path)) {
+                        $errors[] = "移動先に同じ名前のアイテム '{$item['name']}' が既に存在します。";
+                        continue;
+                    }
+            
+                    if (!rename($source_path, $new_path)) {
+                        $errors[] = "'{$item['name']}' の移動に失敗しました。";
+                    }
+                }
+            
+                if (!empty($errors)) {
+                    throw new Exception(implode("\n", $errors));
+                }
+            
+                echo json_encode(['success' => true, 'message' => 'アイテムを移動しました。']);
                 break;
 
             case 'search':
@@ -210,7 +251,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $relative_paths = isset($_POST['relative_paths']) ? json_decode($_POST['relative_paths'], true) : [];
                 foreach ($_FILES['files']['tmp_name'] as $index => $tmp_name) {
                     $file_name = count($relative_paths) > 0 ? $relative_paths[$index] : $_FILES['files']['name'][$index];
-                    $target_path = $safe_path . '/' . $file_name; $dir_path = dirname($target_path);
+                    $target_path = $safe_path . DIRECTORY_SEPARATOR . $file_name; $dir_path = dirname($target_path); // DIRECTORY_SEPARATOR
                     if (!is_dir($dir_path)) mkdir($dir_path, 0777, true);
                     if (!move_uploaded_file($tmp_name, $target_path)) throw new Exception("{$file_name} のアップロードに失敗しました。");
                 }
@@ -219,7 +260,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             case 'create_folder':
                 $folder_name = $_POST['name'] ?? ''; if (empty($folder_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $folder_name)) throw new Exception('無効なフォルダ名です。');
-                $new_folder_path = $safe_path . '/' . $folder_name; if (file_exists($new_folder_path)) throw new Exception('同じ名前のアイテムが存在します。');
+                $new_folder_path = $safe_path . DIRECTORY_SEPARATOR . $folder_name; if (file_exists($new_folder_path)) throw new Exception('同じ名前のアイテムが存在します。');
                 if (!mkdir($new_folder_path, 0777, true)) throw new Exception('フォルダの作成に失敗しました。');
                 echo json_encode(['success' => true, 'message' => 'フォルダを作成しました。']);
                 break;
@@ -227,7 +268,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             case 'create_file':
                 $file_name = $_POST['name'] ?? '';
                 if (empty($file_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $file_name)) throw new Exception('無効なファイル名です。');
-                $new_file_path = $safe_path . '/' . $file_name;
+                $new_file_path = $safe_path . DIRECTORY_SEPARATOR . $file_name;
                 if (file_exists($new_file_path)) throw new Exception('同じ名前のファイルが既に存在します。');
                 if (file_put_contents($new_file_path, '') === false) throw new Exception('ファイルの作成に失敗しました。');
                 echo json_encode(['success' => true, 'message' => 'ファイルを作成しました。']);
@@ -238,7 +279,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (empty($old_name_path) || empty($new_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $new_name)) throw new Exception('無効なファイル名です。');
                 $old_path = getSafePath($user_dir, $old_name_path);
                 if(basename($old_path) === SETTINGS_DIR) throw new Exception('システムフォルダの名前は変更できません。');
-                $new_path = dirname($old_path) . '/' . $new_name;
+                $new_path = dirname($old_path) . DIRECTORY_SEPARATOR . $new_name;
                 if ($old_path === false) throw new Exception('無効なパスです。');
                 if (!file_exists($old_path)) throw new Exception('元のファイルが見つかりません。');
                 if (file_exists($new_path)) throw new Exception('同じ名前のファイルが既に存在します。');
@@ -262,10 +303,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'get_favorites':
-                $fav_file = $user_dir . '/' . FAVORITES_FILE;
+                $fav_file = $user_dir . DIRECTORY_SEPARATOR . FAVORITES_FILE;
                 if (file_exists($fav_file)) {
                     $fav_data = json_decode(file_get_contents($fav_file), true);
-                    echo json_encode(['success' => true, 'favorites' => $fav_data]);
+                    echo json_encode(['success' => true, 'favorites' => $fav_data ?? []]);
                 } else {
                     echo json_encode(['success' => true, 'favorites' => []]);
                 }
@@ -276,7 +317,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (json_last_error() !== JSON_ERROR_NONE) {
                     throw new Exception('無効なデータです。');
                 }
-                $fav_file = $user_dir . '/' . FAVORITES_FILE;
+                $fav_file = $user_dir . DIRECTORY_SEPARATOR . FAVORITES_FILE;
                 file_put_contents($fav_file, json_encode($favorites, JSON_PRETTY_PRINT));
                 echo json_encode(['success' => true, 'message' => 'お気に入りを保存しました。']);
                 break;
@@ -287,8 +328,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'download') {
     $file_to_download = getSafePath($user_dir, $_GET['file']);
-    if ($file_to_download === false || !is_file($file_to_download)) { 
-        http_response_code(404); 
+    if ($file_to_download === false || !is_file($file_to_download)) {
+        http_response_code(404);
         die('File not found.');
     }
     header('Content-Description: File Transfer');
@@ -335,7 +376,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         ::-webkit-scrollbar-track { background: var(--bg-color); }
         ::-webkit-scrollbar-thumb { background-color: #555; border-radius: 10px; border: 3px solid var(--bg-color); }
         ::-webkit-scrollbar-thumb:hover { background-color: #777; }
-        .explorer-container { display: flex; flex-direction: column; height: 100%; }
+        .explorer-container { display: flex; flex-direction: column; height: 100%; position: relative; }
         .header { background: var(--bg-header); border-bottom: 1px solid var(--border-color); }
         .header-tabs { display: flex; padding: 0 12px; position: relative; }
         .tab-item { padding: 10px 16px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
@@ -399,10 +440,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         .nav-item.active { background: var(--bg-selection); }
         .nav-item .icon { width: 20px; height: 20px; flex-shrink: 0; }
         .nav-item.nested { padding-left: 28px; }
-        .content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; user-select: none; position: relative; }
         .file-grid-view { display: none; flex-wrap: wrap; align-content: flex-start; gap: 16px; padding: 16px; overflow-y: auto; }
         .grid-item { display: flex; flex-direction: column; align-items: center; width: 100px; padding: 8px; border-radius: 4px; cursor: pointer; }
-        .grid-item:hover, .grid-item.selected { background: var(--bg-selection); }
+        .grid-item:hover { background: var(--bg-hover); }
+        .grid-item.selected { background: var(--bg-selection); }
         .grid-item .icon { width: 64px; height: 64px; }
         .grid-item .name { font-size: 12px; text-align: center; margin-top: 8px; word-break: break-all; }
         .file-table-view { flex: 1; overflow: auto; display: block;}
@@ -412,13 +454,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             padding: 8px 16px; text-align: left; font-weight: normal;
             border-bottom: 1px solid var(--border-color); position: sticky; top: 0;
             color: var(--text-secondary-color);
-            user-select: none;
         }
         .file-table td {
             padding: 8px 16px; border-bottom: 1px solid var(--border-color);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default;
-            user-select: none;
         }
+        .file-item.cut, .grid-item.cut { opacity: 0.5; }
         .col-check { width: 40px; display: none; }
         .col-name { width: 50%; }
         .col-modified { width: 20%; }
@@ -470,7 +511,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             display: flex; justify-content: space-between; align-items: center;
             user-select: none; border-radius: 4px;
         }
-        .context-menu-item:hover { background: var(--bg-hover); }
+        .context-menu-item.disabled {
+            opacity: 0.5;
+            cursor: default;
+            background: none !important;
+        }
+        .context-menu-item:not(.disabled):hover { background: var(--bg-hover); }
         .context-menu-item .label { display: flex; align-items: center; gap: 12px; }
         .context-menu-item .icon { width: 16px; height: 16px; fill: var(--text-color); }
         .context-menu-item .hint { color: var(--text-secondary-color); font-size: 12px; }
@@ -486,6 +532,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             border-radius: 8px; z-index: 1001;
         }
         .context-menu-item:hover > .submenu { display: block; }
+        #selection-rectangle {
+            position: absolute;
+            border: 1px solid var(--accent-color);
+            background-color: rgba(76, 194, 255, 0.2);
+            pointer-events: none;
+            z-index: 999;
+        }
     </style>
 </head>
 <body>
@@ -582,6 +635,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     </table>
                 </div>
                 <div class="file-grid-view" id="file-grid-view"></div>
+                <div id="selection-rectangle" style="display: none;"></div>
             </div>
             <div id="preview-pane">
                 <div id="preview-placeholder">プレビューするファイルを選択してください</div>
@@ -627,7 +681,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         const previewContent = getEl('preview-content');
         const explorerContainer = document.querySelector('.explorer-container');
         const contentArea = getEl('content-area');
+        const selectionRectangle = getEl('selection-rectangle');
         let currentPath = '/', selectedItems = new Map(), contextMenu = null, isSearchMode = false, favorites = [], currentLayout = 'details';
+        let clipboard = { type: null, items: [] };
+        let isSelecting = false, startX = 0, startY = 0, contentAreaRect;
+
         const history = { past: [], future: [] };
         const ICONS = {
             'back': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L4.81 7.5h8.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06z"/></svg>',
@@ -655,7 +713,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         });
         const apiCall = async (action, formData) => {
             try {
-                const response = await fetch(`?action=${action}`, { method: 'POST', body: formData });
+                if (!formData.has('action')) { formData.append('action', action); }
+                const response = await fetch('', { method: 'POST', body: formData });
                 if (!response.ok) {
                     const err = await response.json().catch(() => ({}));
                     throw new Error(err.message || `サーバーエラー: ${response.status}`);
@@ -699,20 +758,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             }
         };
         const updateSelection = () => {
-             document.querySelectorAll('.file-item.selected, .grid-item.selected').forEach(el => el.classList.remove('selected'));
-             selectedItems.forEach((_, key) => {
-                 document.querySelectorAll(`[data-path="${CSS.escape(key)}"]`).forEach(el => el.classList.add('selected'));
-             });
-             const deleteBtn = getEl('delete-btn');
-             const renameBtn = getEl('rename-btn');
-             const copyBtn = getEl('copy-btn');
-             const cutBtn = getEl('cut-btn');
-             if(deleteBtn) deleteBtn.disabled = selectedItems.size === 0 || Array.from(selectedItems.values()).some(file => file.is_system);
-             if(renameBtn) renameBtn.disabled = selectedItems.size !== 1 || Array.from(selectedItems.values()).some(file => file.is_system);
-             if(copyBtn) copyBtn.disabled = selectedItems.size === 0;
-             if(cutBtn) cutBtn.disabled = selectedItems.size === 0;
-             const totalItems = fileListBody.querySelectorAll('.file-item').length;
-             itemCountEl.textContent = selectedItems.size > 0 ? `${selectedItems.size} 個の項目を選択` : `${totalItems} 項目`;
+            document.querySelectorAll('.file-item.selected, .grid-item.selected').forEach(el => el.classList.remove('selected'));
+            document.querySelectorAll('.file-item.cut, .grid-item.cut').forEach(el => el.classList.remove('cut'));
+
+            selectedItems.forEach((_, key) => {
+                document.querySelectorAll(`[data-path="${CSS.escape(key)}"]`).forEach(el => el.classList.add('selected'));
+            });
+            if (clipboard.type === 'cut') {
+                clipboard.items.forEach(item => {
+                    document.querySelectorAll(`[data-path="${CSS.escape(item.path)}"]`).forEach(el => el.classList.add('cut'));
+                });
+            }
+            const hasSelection = selectedItems.size > 0;
+            const hasSystemFile = Array.from(selectedItems.values()).some(file => file.is_system);
+            
+            getEl('delete-btn').disabled = !hasSelection || hasSystemFile;
+            getEl('rename-btn').disabled = selectedItems.size !== 1 || hasSystemFile;
+            getEl('copy-btn').disabled = !hasSelection;
+            getEl('cut-btn').disabled = !hasSelection || hasSystemFile;
+            getEl('paste-btn').disabled = clipboard.items.length === 0;
+
+            const totalItems = document.querySelectorAll('.file-item, .grid-item').length;
+            itemCountEl.textContent = selectedItems.size > 0 ? `${selectedItems.size} 個の項目を選択` : `${totalItems} 項目`;
         };
         const navigateTo = (path, fromHistory = false) => {
             if (currentPath === path && !fromHistory) return;
@@ -794,11 +861,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             e.stopPropagation();
             hideContextMenu();
             const itemPath = element.dataset.path;
-            const fileData = { name: file.name, is_dir: file.is_dir, is_system: file.is_system };
+            const fileData = { path: itemPath, name: file.name, is_dir: file.is_dir, is_system: file.is_system };
             if (e.target.type === 'checkbox') {
                  e.target.checked ? selectedItems.set(itemPath, fileData) : selectedItems.delete(itemPath);
             } else if (e.ctrlKey) {
                 selectedItems.has(itemPath) ? selectedItems.delete(itemPath) : selectedItems.set(itemPath, fileData);
+            } else if (e.shiftKey && selectedItems.size > 0) {
+                // Shift-click logic would go here, which can be complex.
+                // For now, it behaves like a normal click.
+                selectedItems.clear();
+                selectedItems.set(itemPath, fileData);
             } else {
                 selectedItems.clear();
                 selectedItems.set(itemPath, fileData);
@@ -811,7 +883,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             e.preventDefault();
             e.stopPropagation();
             const itemPath = row.dataset.path;
-            const fileData = { name: file.name, is_dir: file.is_dir, is_system: file.is_system };
+            const fileData = { path: itemPath, name: file.name, is_dir: file.is_dir, is_system: file.is_system };
             if (!selectedItems.has(itemPath)) {
                 selectedItems.clear();
                 selectedItems.set(itemPath, fileData);
@@ -839,24 +911,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             contextMenu = document.createElement('div');
             contextMenu.className = 'context-menu';
             document.body.appendChild(contextMenu);
+
+            const hasSelection = selectedItems.size > 0;
+            const canPaste = clipboard.items.length > 0;
+            const isSystem = fileInfo ? fileInfo.is_system : false;
+            
             let menuItemsHTML = '';
-            if(fileInfo.is_system) {
-                menuItemsHTML += `<div class="context-menu-item" data-action="open"><span class="label">開く</span></div>`;
-            } else {
+            if (fileInfo) { // Item context menu
                 const openActionText = fileInfo.is_dir ? '開く' : 'ダウンロード';
                 menuItemsHTML += `<div class="context-menu-item" data-action="open"><span class="label">${openActionText}</span></div>`;
                 if (!fileInfo.is_dir) menuItemsHTML += `<div class="context-menu-item has-submenu"><span class="label">アプリで開く</span><div class="submenu"><div class="context-menu-item" data-action="open-with-notepad"><span class="label">Notepad</span></div></div></div>`;
-                if (fileInfo.is_dir) {
-                    const isFavorite = favorites.some(fav => fav.path === element.dataset.path);
-                    menuItemsHTML += `<div class="context-menu-item" data-action="${isFavorite ? 'remove_favorite' : 'add_favorite'}"><span class="label">${isFavorite ? 'お気に入りから削除' : 'お気に入りに追加'}</span></div>`;
+
+                if (!isSystem) {
+                    menuItemsHTML += `<div class="context-menu-separator"></div>`;
+                    menuItemsHTML += `<div class="context-menu-item" data-action="cut"><span class="label">切り取り</span></div>`;
+                    menuItemsHTML += `<div class="context-menu-separator"></div>`;
+                    menuItemsHTML += `<div class="context-menu-item" data-action="delete"><span class="label">削除</span></div>`;
+                    menuItemsHTML += `<div class="context-menu-item" data-action="rename"><span class="label">名前の変更</span></div>`;
                 }
-                menuItemsHTML += `<div class="context-menu-separator"></div><div class="context-menu-item" data-action="delete"><span class="label">削除</span></div><div class="context-menu-item" data-action="rename"><span class="label">名前の変更</span></div>`;
+
+            } else { // View context menu
+                menuItemsHTML += `<div class="context-menu-item ${canPaste ? '' : 'disabled'}" data-action="paste"><span class="label">貼り付け</span></div>`;
+                menuItemsHTML += `<div class="context-menu-separator"></div>`;
+                menuItemsHTML += `<div class="context-menu-item has-submenu"><span class="label">新規作成</span><div class="submenu"><div class="context-menu-item" data-action="create_folder"><span class="label">フォルダー</span></div><div class="context-menu-item" data-action="create_file"><span class="label">テキスト ドキュメント</span></div></div></div>`;
+                menuItemsHTML += `<div class="context-menu-separator"></div>`;
+                menuItemsHTML += `<div class="context-menu-item" data-action="copy_path"><span class="label">パスのコピー</span></div>`;
             }
+
             contextMenu.innerHTML = menuItemsHTML;
             positionMenu(contextMenu, e.clientX, e.clientY);
             contextMenu.addEventListener('click', ev => {
                 const item = ev.target.closest('.context-menu-item');
-                if (item && !item.classList.contains('has-submenu')) handleContextMenuAction(item.dataset.action, fileInfo, element);
+                if (item && !item.classList.contains('has-submenu') && !item.classList.contains('disabled')) {
+                    handleContextMenuAction(item.dataset.action, fileInfo, element);
+                }
             });
             contextMenu.querySelectorAll('.has-submenu').forEach(item => {
                 item.addEventListener('mouseenter', () => {
@@ -874,6 +962,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 case 'open-with-notepad': window.parent.postMessage({ type: 'openWithApp', app: 'notepad', filePath: itemPath }, '*'); break;
                 case 'rename': initiateRename(element); break;
                 case 'delete': deleteItems(); break;
+                case 'cut': cutItems(); break;
+                case 'paste': pasteItems(); break;
                 case 'add_favorite': addFavorite(itemPath, fileInfo.name); break;
                 case 'remove_favorite': removeFavorite(itemPath); break;
                 case 'copy_path': copyToClipboard(currentPath); break;
@@ -893,7 +983,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 const newName = input.value.trim();
                 nameSpan.style.display = ''; input.remove();
                 if (newName && newName !== oldName) {
-                    const formData = new FormData(); formData.append('action', 'rename'); formData.append('item_path', rowElement.dataset.path); formData.append('new_name', newName);
+                    const formData = new FormData(); formData.append('item_path', rowElement.dataset.path); formData.append('new_name', newName);
                     const result = await apiCall('rename', formData);
                     if (result && result.success) isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath);
                 }
@@ -912,26 +1002,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         };
         const createFolder = async () => {
             const name = prompt('新しいフォルダ名:', '新しいフォルダー'); if (!name) return;
-            const formData = new FormData(); formData.append('action', 'create_folder'); formData.append('path', currentPath); formData.append('name', name);
+            const formData = new FormData(); formData.append('path', currentPath); formData.append('name', name);
             const result = await apiCall('create_folder', formData);
             if (result && result.success) loadDirectory(currentPath);
         };
         const createNewFile = async () => {
             const name = prompt('新しいファイル名:', '新規テキストドキュメント.txt'); if (!name) return;
-            const formData = new FormData(); formData.append('action', 'create_file'); formData.append('path', currentPath); formData.append('name', name);
+            const formData = new FormData(); formData.append('path', currentPath); formData.append('name', name);
             const result = await apiCall('create_file', formData);
             if (result && result.success) loadDirectory(currentPath);
         };
         const deleteItems = async () => {
             if (selectedItems.size === 0 || !confirm(`${selectedItems.size}個の項目を完全に削除しますか？`)) return;
-            const itemsToDelete = Array.from(selectedItems.keys()).map(path => ({ path, name: selectedItems.get(path).name }));
-            const formData = new FormData(); formData.append('action', 'delete'); formData.append('items', JSON.stringify(itemsToDelete));
+            const itemsToDelete = Array.from(selectedItems.values());
+            const formData = new FormData(); formData.append('items', JSON.stringify(itemsToDelete.map(item => ({path: item.path, name: item.name}))));
             const result = await apiCall('delete', formData);
             if (result && result.success) { selectedItems.clear(); isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath); }
         };
+        const cutItems = () => {
+            if (selectedItems.size > 0) {
+                clipboard.type = 'cut';
+                clipboard.items = Array.from(selectedItems.values());
+                updateSelection();
+            }
+        };
+        const pasteItems = async () => {
+            if (clipboard.items.length === 0) return;
+            const formData = new FormData();
+            formData.append('items', JSON.stringify(clipboard.items));
+            formData.append('destination', currentPath);
+
+            let result;
+            if (clipboard.type === 'cut') {
+                result = await apiCall('move', formData);
+            }
+            // Add else if (clipboard.type === 'copy') for copy functionality later
+
+            if (result && result.success) {
+                clipboard = { type: null, items: [] }; // Clear clipboard on successful paste
+                loadDirectory(currentPath);
+            } else {
+                updateSelection(); // Re-render to remove 'cut' style if paste fails
+            }
+        };
         const downloadFile = (filePath) => { window.location.href = `?action=download&file=${encodeURIComponent(filePath)}`; };
         const searchFiles = async (term) => {
-            const formData = new FormData(); formData.append('action', 'search'); formData.append('query', term);
+            const formData = new FormData(); formData.append('query', term);
             const data = await apiCall('search', formData);
             if (data && data.success) { isSearchMode = true; renderItems(data.files, true); }
         };
@@ -940,7 +1056,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             if (data && data.success) { favorites = data.favorites; renderFavorites(); }
         };
         const saveFavorites = async () => {
-            const formData = new FormData(); formData.append('action', 'save_favorites'); formData.append('favorites', JSON.stringify(favorites));
+            const formData = new FormData(); formData.append('favorites', JSON.stringify(favorites));
             await apiCall('save_favorites', formData);
         };
         const renderFavorites = () => {
@@ -972,27 +1088,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         };
         const showViewContextMenu = (e) => {
             hideContextMenu();
-            contextMenu = document.createElement('div');
-            contextMenu.className = 'context-menu';
-            document.body.appendChild(contextMenu);
-            contextMenu.innerHTML = `<div class="context-menu-item has-submenu"><span class="label">新規作成</span><div class="submenu"><div class="context-menu-item" data-action="create_folder"><span class="label">フォルダー</span></div><div class="context-menu-item" data-action="create_file"><span class="label">テキスト ドキュメント</span></div></div></div><div class="context-menu-separator"></div><div class="context-menu-item" data-action="copy_path"><span class="label">パスのコピー</span></div>`;
-            positionMenu(contextMenu, e.clientX, e.clientY);
-            contextMenu.querySelectorAll('.has-submenu').forEach(item => { item.addEventListener('mouseenter', () => { const submenu = item.querySelector('.submenu'); if (submenu) positionMenu(submenu, 0, 0, item); }); });
-            contextMenu.addEventListener('click', (ev) => {
-                const item = ev.target.closest('.context-menu-item');
-                if (item && !item.classList.contains('has-submenu')) handleContextMenuAction(item.dataset.action, null, null);
-            });
+            showContextMenu(e, null, null);
         };
         const copyToClipboard = (text) => {
-            const textArea = document.createElement('textarea');
-            textArea.value = text;
-            textArea.style.position = 'fixed';
-            textArea.style.left = '-9999px';
-            document.body.appendChild(textArea);
-            textArea.focus();
-            textArea.select();
-            try { document.execCommand('copy'); } catch (err) { console.error('Fallback: Oops, unable to copy', err); }
-            document.body.removeChild(textArea);
+            navigator.clipboard.writeText(text).catch(err => console.error('クリップボードへのコピーに失敗:', err));
         };
         const addFavorite = (path, name) => {
             if (!favorites.some(fav => fav.path === path)) { favorites.push({ path, name }); saveFavorites(); renderFavorites(); }
@@ -1017,14 +1116,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                  previewPlaceholder.textContent = 'このファイル形式のプレビューはありません。'; previewPlaceholder.style.display = 'block';
             }
         };
+        const startSelection = (e) => {
+            if (e.target.closest('.file-item, .grid-item')) return;
+            isSelecting = true;
+            contentAreaRect = contentArea.getBoundingClientRect();
+            startX = e.clientX - contentAreaRect.left;
+            startY = e.clientY - contentAreaRect.top;
+            selectionRectangle.style.left = `${startX}px`;
+            selectionRectangle.style.top = `${startY}px`;
+            selectionRectangle.style.width = '0px';
+            selectionRectangle.style.height = '0px';
+            selectionRectangle.style.display = 'block';
+            document.addEventListener('mousemove', doSelection);
+            document.addEventListener('mouseup', endSelection);
+        };
+        const doSelection = (e) => {
+            if (!isSelecting) return;
+            e.preventDefault();
+            const currentX = e.clientX - contentAreaRect.left;
+            const currentY = e.clientY - contentAreaRect.top;
+            const left = Math.min(startX, currentX);
+            const top = Math.min(startY, currentY);
+            const width = Math.abs(startX - currentX);
+            const height = Math.abs(startY - currentY);
+            selectionRectangle.style.left = `${left}px`;
+            selectionRectangle.style.top = `${top}px`;
+            selectionRectangle.style.width = `${width}px`;
+            selectionRectangle.style.height = `${height}px`;
 
+            const rect = selectionRectangle.getBoundingClientRect();
+            const items = document.querySelectorAll('.file-item, .grid-item');
+            if (!e.ctrlKey) selectedItems.clear();
+            items.forEach(itemEl => {
+                const itemRect = itemEl.getBoundingClientRect();
+                const path = itemEl.dataset.path;
+                const fileData = { path, name: itemEl.dataset.name, is_dir: itemEl.dataset.isDir === 'true', is_system: itemEl.dataset.isSystem === 'true' };
+                if (rect.left < itemRect.right && rect.right > itemRect.left && rect.top < itemRect.bottom && rect.bottom > itemRect.top) {
+                    if (!selectedItems.has(path)) selectedItems.set(path, fileData);
+                }
+            });
+            updateSelection();
+        };
+        const endSelection = () => {
+            isSelecting = false;
+            selectionRectangle.style.display = 'none';
+            document.removeEventListener('mousemove', doSelection);
+            document.removeEventListener('mouseup', endSelection);
+        };
+        
+        addEventListenerIfPresent('cut-btn', 'click', cutItems);
+        addEventListenerIfPresent('paste-btn', 'click', pasteItems);
         addEventListenerIfPresent('upload-file-btn', 'click', () => fileInput.click());
         addEventListenerIfPresent('upload-folder-btn', 'click', () => folderInput.click());
         addEventListenerIfPresent('preview-pane-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); previewPane.classList.toggle('active'); showPreview(); });
         addEventListenerIfPresent('item-checkboxes-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); explorerContainer.classList.toggle('show-checkboxes'); });
         addEventListenerIfPresent('new-folder-btn', 'click', createFolder);
         addEventListenerIfPresent('delete-btn', 'click', deleteItems);
-        addEventListenerIfPresent('rename-btn', 'click', () => { if(selectedItems.size !== 1) return; const path = selectedItems.keys().next().value; const row = fileListBody.querySelector(`tr[data-path="${CSS.escape(path)}"]`); if (row) initiateRename(row); });
+        addEventListenerIfPresent('rename-btn', 'click', () => { if(selectedItems.size !== 1) return; const path = selectedItems.keys().next().value; const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`); if (el) initiateRename(el); });
 
         document.querySelectorAll('.layout-btn').forEach(btn => btn.addEventListener('click', (e) => {
             const activeBtn = document.querySelector('.layout-btn.active');
@@ -1053,9 +1201,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         body.addEventListener('dragover', (e) => { e.preventDefault(); });
         body.addEventListener('dragleave', (e) => { if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) dragDropOverlay.classList.remove('visible'); });
         body.addEventListener('drop', (e) => { e.preventDefault(); dragDropOverlay.classList.remove('visible'); uploadFiles(e.dataTransfer.files, false); });
+        contentArea.addEventListener('mousedown', startSelection);
         contentArea.addEventListener('contextmenu', (e) => { if (e.target.closest('.file-item') || e.target.closest('.grid-item')) return; e.preventDefault(); showViewContextMenu(e); });
-        document.addEventListener('click', (e) => { hideContextMenu(); if (!e.target.closest('.file-table-view') && !e.target.closest('.file-grid-view') && !e.target.closest('.address-bar-container') && !e.target.closest('.nav-pane')) { selectedItems.clear(); updateSelection(); } });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') hideContextMenu(); if (e.key === 'Delete' && selectedItems.size > 0 && document.activeElement.tagName !== 'INPUT') deleteItems(); if (e.key === 'F2' && selectedItems.size === 1) { const path = selectedItems.keys().next().value; const row = fileListBody.querySelector(`tr[data-path="${CSS.escape(path)}"]`); if (row) initiateRename(row); } });
+        document.addEventListener('click', (e) => {
+            hideContextMenu();
+            const clickedInside = e.target.closest('.content-area, .toolbar, .nav-pane, .address-bar-container');
+            if (!clickedInside) {
+                selectedItems.clear();
+                updateSelection();
+            }
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideContextMenu(); } if (e.key === 'Delete' && selectedItems.size > 0 && document.activeElement.tagName !== 'INPUT') { deleteItems(); } if (e.key === 'F2' && selectedItems.size === 1) { const path = selectedItems.keys().next().value; const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`); if (el) initiateRename(el); } if (e.ctrlKey && e.key.toLowerCase() === 'x') { e.preventDefault(); cutItems(); } if (e.ctrlKey && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteItems(); } });
 
         loadFavorites();
         loadDirectory(currentPath);
