@@ -1,4 +1,16 @@
 <?php
+if (isset($_GET['action']) && $_GET['action'] === 'get_privacy_policy') {
+    header('Content-Type: text/html; charset=utf-8');
+    $policy_file = __DIR__ . '/page/privacy.html';
+    if (file_exists($policy_file)) {
+        readfile($policy_file);
+    } else {
+        http_response_code(404);
+        echo 'プライバシーポリシーのファイルが見つかりません。';
+    }
+    exit;
+}
+
 require_once __DIR__ . '/system/boot.php';
 $auth = new Auth();
 $initialState = $auth->getInitialState();
@@ -18,7 +30,6 @@ $initialState = $auth->getInitialState();
     </style>
 </head>
 <body>
-    <!-- コンソールウィンドウのテンプレート -->
     <template id="console-window-template">
         <div class="window-container console-window">
              <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
@@ -27,25 +38,22 @@ $initialState = $auth->getInitialState();
         </div>
     </template>
     
-    <!-- エクスプローラーウィンドウのテンプレート -->
     <template id="explorer-window-template">
         <div class="window-container explorer-window">
             <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
             <div class="title-bar"><div class="title-bar-text"><span class="title-bar-icon icon-explorer"></span><span class="window-title">エクスプローラー</span></div><div class="window-controls"><span class="minimize-btn">_</span><span class="maximize-btn">&#10065;</span><span class="close-btn">X</span></div></div>
-            <iframe src="system/explorer.php" class="window-content-frame" name="explorer-iframe-<?php echo uniqid(); ?>"></iframe>
+            <iframe src="system/application/explorer.php" class="window-content-frame" name="explorer-iframe-<?php echo uniqid(); ?>"></iframe>
         </div>
     </template>
 
-    <!-- メモ帳ウィンドウのテンプレート -->
     <template id="notepad-window-template">
         <div class="window-container notepad-window">
             <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
             <div class="title-bar"><div class="title-bar-text"><span class="title-bar-icon icon-notepad"></span><span class="window-title">無題 - メモ帳</span></div><div class="window-controls"><span class="minimize-btn">_</span><span class="maximize-btn">&#10065;</span><span class="close-btn">X</span></div></div>
-            <iframe src="system/notepad.php" class="window-content-frame" name="notepad-iframe-<?php echo uniqid(); ?>"></iframe>
+            <iframe src="system/application/notepad.php" class="window-content-frame" name="notepad-iframe-<?php echo uniqid(); ?>"></iframe>
         </div>
     </template>
 
-    <!-- ファイルエクスプローラーダイアログウィンドウのテンプレート -->
     <template id="file_explorer_dialog-window-template">
         <div class="window-container file-explorer-dialog-window">
             <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
@@ -53,6 +61,17 @@ $initialState = $auth->getInitialState();
             <iframe src="" class="window-content-frame" name="file_explorer_dialog-iframe-<?php echo uniqid(); ?>"></iframe>
         </div>
     </template>
+
+    <div id="privacy-policy-overlay" style="display: none;" tabindex="-1">
+        <div class="bios-screen">
+            <header class="bios-header">プライバシーポリシー</header>
+            <div class="privacy-content" tabindex="0"></div>
+            <footer class="bios-footer">
+                <button id="privacy-ok-btn" disabled>OK (Enter)</button>
+                 <span>(下にスクロールして同意)</span>
+            </footer>
+        </div>
+    </div>
 
     <div id="minimized-area"></div>
     <div class="snap-indicator" style="display: none;"></div>
@@ -65,6 +84,7 @@ $initialState = $auth->getInitialState();
     </script>
     <script src="js/api.js" type="module"></script>
     <script src="js/contextMenu.js" type="module"></script>
+    <script src="js/privacyPolicy.js" type="module"></script>
     <script src="js/windowManager.js" type="module"></script>
     <script src="js/windowSwitcher.js" type="module"></script>
     <script src="js/console.js" type="module"></script>

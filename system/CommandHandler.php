@@ -52,10 +52,16 @@ class CommandHandler
         $currentMode = $this->interactionState['mode'] ?? 'main';
         $interactionType = $this->interactionState['type'] ?? null;
         
+        $postData = json_decode(file_get_contents('php://input'), true) ?? [];
+        $args = ['input' => $input];
+        if (isset($postData['consent'])) {
+            $args['consent'] = $postData['consent'];
+        }
+
         if ($interactionType) {
             $commandInstance = $this->findCommand($interactionType, $currentMode);
             if ($commandInstance) {
-                $response = $commandInstance->execute(['input' => $input], $this->auth, $this->interactionState);
+                $response = $commandInstance->execute($args, $this->auth, $this->interactionState);
             } else {
                 $response = ['output' => '対話セッションで致命的なエラーが発生しました。', 'clear' => false];
                 $this->interactionState = null;
@@ -90,12 +96,10 @@ class CommandHandler
 
         if ($mode === 'account') {
             if (file_exists($account_file)) return $instance;
-            // accountモードでもhelpは使えるようにする
             if ($commandName === 'help' && file_exists($guest_file)) return $instance;
             return null;
         }
         
-        // mainモードの場合
         if (file_exists($guest_file)) return $instance;
         if ($this->auth->isLoggedIn() && file_exists($login_file)) return $instance;
 

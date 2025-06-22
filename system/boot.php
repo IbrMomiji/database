@@ -3,7 +3,10 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+if (
+    $_SERVER['REQUEST_METHOD'] !== 'POST' && 
+    !(isset($_GET['action']) && $_GET['action'] === 'get_privacy_policy')
+) {
     $_SESSION = [];
     session_destroy();
     session_start();

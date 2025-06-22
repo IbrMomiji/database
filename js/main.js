@@ -1,6 +1,7 @@
 import WindowManager from './windowManager.js';
 import { contextMenu } from './contextMenu.js';
 import { WindowSwitcher } from './windowSwitcher.js';
+import { PrivacyPolicyManager } from './privacyPolicy.js';
 
 const initialClientState = window.initialClientState || {
     history: [],
@@ -40,6 +41,10 @@ class App {
         }
 
         window.addEventListener('keydown', (e) => {
+            if (document.getElementById('privacy-policy-overlay').style.display === 'flex') {
+                return;
+            }
+
             if (e.altKey && e.key.toLowerCase() === 'w') {
                 e.preventDefault();
                 if (!this.windowSwitcher.isVisible) {

@@ -1,4 +1,5 @@
 import { postCommand } from './api.js';
+import { PrivacyPolicyManager } from './privacyPolicy.js';
 
 export class Console {
     constructor(el, windowManager, options) {
@@ -9,6 +10,7 @@ export class Console {
         this.inputEl = el.querySelector('.console-input');
         this.inputLineEl = el.querySelector('.input-line');
         this.consoleBody = el.querySelector('.console-body');
+        this.privacyManager = new PrivacyPolicyManager(this);
 
         this.el.dataset.defaultPrompt = options.prompt || 'database&gt; ';
         this.outputEl.innerHTML = options.history ? options.history.join('') : '';
@@ -28,6 +30,14 @@ export class Console {
         this.consoleBody.addEventListener('click', () => {
             if (window.getSelection().toString() === '') this.focus();
         });
+        this.el.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                if(this.el.dataset.isInteractive) {
+                    this.inputEl.value = 'cancel';
+                    this._onCommandSubmit(new KeyboardEvent('keydown', { key: 'Enter' }));
+                }
+            }
+        });
     }
 
     async _onCommandSubmit(e) {
@@ -42,17 +52,17 @@ export class Console {
         this.inputEl.disabled = true;
         
         try {
-            const data = await postCommand(command, this.el.dataset.defaultPrompt);
+            const data = await postCommand(command, currentPromptText);
 
             if (this.el.dataset.isInteractive) {
                 let echoText = this._escapeHtml(currentPromptText);
-                echoText += isPassword ? '*'.repeat(command.length) : this._escapeHtml(command);
+                echoText += isPassword ? '********' : this._escapeHtml(command);
                 this.outputEl.innerHTML += `<div>${echoText}</div>`;
             } else if (command) {
                 this.outputEl.innerHTML += `<div>${this._escapeHtml(currentPromptText + command)}</div>`;
             }
 
-            this._handleResponse(data);
+            await this._handleResponse(data);
         } catch (error) {
             this.outputEl.innerHTML += `<div class="error">クライアントエラー: ${error.message}</div>`;
             this._resetToDefaultPrompt();
@@ -63,7 +73,26 @@ export class Console {
         }
     }
     
-    _handleResponse(data) {
+    async _handleResponse(data) {
+        if (data.action && data.action.type === 'show_privacy_policy') {
+            const didConsent = await this.privacyManager.show();
+            
+            this.inputEl.disabled = true;
+            try {
+                const commandName = this.el.dataset.isInteractive ? 'register' : (data.action.command || 'register');
+                const consentData = await postCommand(commandName, this.el.dataset.defaultPrompt, { consent: didConsent });
+                await this._handleResponse(consentData);
+            } catch (error) {
+                this.outputEl.innerHTML += `<div class="error">クライアントエラー: ${error.message}</div>`;
+                this._resetToDefaultPrompt();
+            } finally {
+                this.inputEl.disabled = false;
+                this._scrollToBottom();
+                this.focus();
+            }
+            return;
+        }
+
         if (data.interactive_final) {
             this.el.dataset.isInteractive = 'true';
             if (data.output) this.outputEl.innerHTML += `<div>${data.output}</div>`;
@@ -99,10 +128,8 @@ export class Console {
         this.inputEl.type = 'text';
         if (newPrompt !== null) {
             this.el.dataset.defaultPrompt = newPrompt;
-            this.promptEl.innerHTML = newPrompt;
-        } else {
-            this.promptEl.innerHTML = this.el.dataset.defaultPrompt || 'database&gt; ';
         }
+        this.promptEl.innerHTML = this.el.dataset.defaultPrompt || 'database&gt; ';
     }
     
     _scrollToBottom() {

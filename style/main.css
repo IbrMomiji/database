@@ -432,3 +432,83 @@ body {
     max-width: 100%;
     text-align: center;
 }
+
+#privacy-policy-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: #aa0000;
+    color: #FFFFFF;
+    font-family: 'MS Gothic', 'Osaka-mono', monospace;
+    font-size: 16px;
+    z-index: 99999;
+    align-items: center;
+    justify-content: center;
+}
+#privacy-policy-overlay .bios-screen {
+    width: 90%;
+    max-width: 800px;
+    height: 90%;
+    max-height: 600px;
+    background: #0000AA;
+    border: 2px solid #FFFFFF;
+    padding: 0.5rem;
+    display: flex;
+    flex-direction: column;
+}
+#privacy-policy-overlay .bios-header {
+    background-color: #888888;
+    color: #FFFFFF;
+    text-align: center;
+    padding: 0.2rem 0;
+    margin-bottom: 1rem;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+#privacy-policy-overlay .bios-footer {
+    background-color: #888888;
+    color: #FFFFFF;
+    text-align: center;
+    padding: 0.5rem 0;
+    margin-top: 1rem;
+    font-weight: bold;
+    flex-shrink: 0;
+}
+#privacy-policy-overlay .privacy-content {
+    flex-grow: 1;
+    overflow-y: scroll;
+    border: 1px solid #fff;
+    padding: 1rem;
+    background-color: #000080;
+    outline: none;
+    white-space: pre-wrap;
+}
+#privacy-policy-overlay .privacy-content::-webkit-scrollbar {
+  width: 16px;
+}
+#privacy-policy-overlay .privacy-content::-webkit-scrollbar-track {
+  background: #0000AA;
+}
+#privacy-policy-overlay .privacy-content::-webkit-scrollbar-thumb {
+  background: #c0c0c0;
+  border: 1px solid #fff;
+}
+#privacy-policy-overlay button {
+    padding: 0.5rem 2rem;
+    background: #888888;
+    color: #FFFFFF;
+    border: 1px solid #FFFFFF;
+    font-size: 1rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+#privacy-policy-overlay button:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+#privacy-policy-overlay button:focus, #privacy-policy-overlay button:not(:disabled):hover {
+    background: #FFFFFF;
+    color: #0000AA;
+}

@@ -1,21 +1,18 @@
-/**
- * サーバーにコマンドをPOSTリクエストで送信する
- * @param {string} command - 送信するコマンド文字列
- * @param {string} currentPrompt - 現在のプロンプト文字列
- * @returns {Promise<object>} サーバーからのJSONレスポンス
- */
-export async function postCommand(command, currentPrompt) {
+export async function postCommand(command, currentPrompt, extraData = {}) {
     try {
+        const payload = {
+            command: command,
+            current_prompt: currentPrompt,
+            ...extraData
+        };
+
         const response = await fetch('index.php', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
             },
-            body: JSON.stringify({
-                command: command,
-                current_prompt: currentPrompt,
-            }),
+            body: JSON.stringify(payload),
         });
 
         const data = await response.json();

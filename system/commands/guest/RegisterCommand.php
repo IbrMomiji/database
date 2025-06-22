@@ -1,46 +1,74 @@
-<?php // system/commands/guest/RegisterCommand.php
+<?php
 
 class RegisterCommand implements ICommand
 {
     public function execute(array $args, Auth $auth, &$interactionState): array
     {
-        // 対話モードの処理
-        if ($interactionState && $interactionState['type'] === 'register') {
-            if ($interactionState['step'] === 'get_username') {
-                $interactionState['username'] = $args['input'];
+        $input = $args['input'] ?? null;
+        $step = $interactionState['step'] ?? 'start';
+
+        if ($step === 'start' && !empty($args['u']) && !empty($args['p'])) {
+            $interactionState = [
+                'type' => 'register',
+                'step' => 'awaiting_consent',
+                'username' => $args['u'],
+                'password' => $args['p']
+            ];
+            return ['output' => '', 'action' => ['type' => 'show_privacy_policy']];
+        }
+
+        switch ($step) {
+            case 'start':
+                $interactionState = ['type' => 'register', 'step' => 'get_username'];
+                return [
+                    'output' => '登録するユーザー名を入力してください:',
+                    'interactive_final' => true,
+                ];
+            
+            case 'get_username':
+                $interactionState['username'] = $input;
                 $interactionState['step'] = 'get_password';
                 return [
-                    'output' => '', 'clear' => false,
-                    'prompt_text' => 'パスワードを入力してください: ',
+                    'output' => 'パスワードを入力してください:',
                     'input_type' => 'password',
                     'interactive_final' => true,
                 ];
-            }
-            if ($interactionState['step'] === 'get_password') {
-                $username = $interactionState['username'];
-                $password = $args['input'];
-                $result = $auth->register($username, $password);
-                $interactionState = null; // 対話モード終了
-                return ['output' => $result['message'], 'clear' => false];
-            }
+
+            case 'get_password':
+                $interactionState['password'] = $input;
+                $interactionState['step'] = 'prompt_consent';
+                return [
+                    'output' => "プライバシーポリシーに同意してアカウントを作成します。\nEnterキーでポリシーを表示、Escキーでキャンセルします。",
+                    'interactive_final' => true,
+                    'prompt_text' => ''
+                ];
+
+            case 'prompt_consent':
+                if ($input === '') {
+                    $interactionState['step'] = 'awaiting_consent';
+                    return ['output' => '', 'action' => ['type' => 'show_privacy_policy']];
+                } else {
+                    $interactionState = null;
+                    return ['output' => 'アカウントの作成をキャンセルしました。'];
+                }
+
+            case 'awaiting_consent':
+                if (isset($args['consent']) && $args['consent'] === true) {
+                    $username = $interactionState['username'];
+                    $password = $interactionState['password'];
+                    $result = $auth->register($username, $password);
+                    $interactionState = null;
+                    return ['output' => $result['message']];
+                } else {
+                    $interactionState = null;
+                    return ['output' => 'アカウントの作成をキャンセルしました。'];
+                }
         }
 
-        // 引数で直接指定された場合の処理
-         if (!empty($args['u']) && !empty($args['p'])) {
-            $result = $auth->register($args['u'], $args['p']);
-            return ['output' => $result['message'], 'clear' => false];
-        } else {
-            // 対話モードを開始
-            $interactionState = ['type' => 'register', 'step' => 'get_username'];
-            return [
-                'output' => '', 'clear' => false,
-                'prompt_text' => '登録するユーザー名を入力してください: ',
-                'input_type' => 'text',
-                'interactive_final' => true,
-            ];
-        }
+        $interactionState = null;
+        return ['output' => "予期せぬエラーが発生しました。"];
     }
-    // ... getDescription, getUsage, getArgumentDefinition は変更なし ...
+
     public function getArgumentDefinition(): array { return ['u', 'p']; }
     public function getDescription(): string { return "新しいユーザーアカウントを作成します。"; }
     public function getUsage(): string { return "usage: register [-u ユーザー名] [-p パスワード]\n\n説明:\n  新しいユーザーアカウントを作成します。\n  引数を省略した場合、対話形式でユーザー名とパスワードを求められます。"; }
