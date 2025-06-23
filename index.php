@@ -50,6 +50,24 @@ $initialState = $auth->getInitialState();
         </div>
     </template>
 
+    <template id="share-window-template">
+        <div class="window-container share-window">
+            <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
+            <div class="title-bar">
+                <div class="title-bar-text">
+                    <span class="title-bar-icon icon-share"></span>
+                    <span class="window-title">共有</span>
+                </div>
+                <div class="window-controls">
+                    <span class="minimize-btn">_</span>
+                    <span class="maximize-btn">&#10065;</span>
+                    <span class="close-btn">X</span>
+                </div>
+            </div>
+            <iframe src="" class="window-content-frame"></iframe>
+        </div>
+    </template>
+
     <template id="notepad-window-template">
         <div class="window-container notepad-window">
             <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>

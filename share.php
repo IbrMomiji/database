@@ -1,4 +1,7 @@
 <?php
+// タイムゾーンを東京に設定
+date_default_timezone_set('Asia/Tokyo');
+
 require_once __DIR__ . '/system/boot.php';
 
 if (session_status() == PHP_SESSION_NONE) {
