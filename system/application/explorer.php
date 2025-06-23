@@ -63,7 +63,6 @@ function getSafePath($baseDir, $path) {
     $finalPath = $baseDir . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $safeParts);
     $realBaseDir = realpath($baseDir);
     if ($realBaseDir === false) {
-        error_log("Explorer Critical Error: Base directory not found or inaccessible: " . $baseDir);
         return false;
     }
     $realFinalPath = realpath($finalPath);
@@ -95,7 +94,6 @@ function getDirectorySize($dir) {
             }
         }
     } catch (Exception $e) {
-        error_log("getDirectorySize failed for $dir: " . $e->getMessage());
         return 0;
     }
     return $size;
@@ -134,9 +132,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $path = $_POST['path'] ?? '/';
 
     try {
-        $safe_path = getSafePath($user_dir, $path);
-        if ($safe_path === false && !in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites'])) {
-            throw new Exception('無効なパスです。');
+        if (!in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites', 'get_users_for_sharing', 'create_share', 'get_shares_for_item', 'delete_share', 'get_all_shares'])) {
+             $safe_path = getSafePath($user_dir, $path);
+             if ($safe_path === false) {
+                 throw new Exception('無効なパスです。');
+             }
         }
 
         switch ($action) {
@@ -204,7 +204,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
             
                     if (realpath($source_path) == realpath($new_path)) {
-                        continue; // 同じ場所への移動はスキップ
+                        continue;
                     }
 
                     if (file_exists($new_path)) {
@@ -244,7 +244,110 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $used_size = getDirectorySize($user_dir);
                 echo json_encode(['success' => true, 'used' => $used_size, 'total' => MAX_STORAGE_BYTES, 'used_formatted' => formatBytes($used_size), 'total_formatted' => formatBytes(MAX_STORAGE_BYTES)]);
                 break;
+            
+            case 'get_users_for_sharing':
+                $term = $_POST['term'] ?? '';
+                $owner_id = $_SESSION['user_id'];
+                $stmt = $db->prepare("SELECT id, username FROM users WHERE username LIKE :term AND id != :owner_id LIMIT 10");
+                $stmt->execute([':term' => "%$term%", ':owner_id' => $owner_id]);
+                $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                echo json_encode(['success' => true, 'users' => $users]);
+                break;
 
+            case 'get_all_shares':
+                 $stmt = $db->prepare("SELECT * FROM shares WHERE owner_user_id = :owner_user_id ORDER BY created_at DESC");
+                 $stmt->execute([':owner_user_id' => $_SESSION['user_id']]);
+                 $shares = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                 echo json_encode(['success' => true, 'shares' => $shares]);
+                 break;
+
+            case 'get_shares_for_item':
+                $item_path = $_POST['item_path'] ?? '';
+                if (empty($item_path)) throw new Exception('アイテムが指定されていません。');
+                
+                $stmt = $db->prepare("SELECT * FROM shares WHERE owner_user_id = :owner_user_id AND source_path = :source_path");
+                $stmt->execute([':owner_user_id' => $_SESSION['user_id'], ':source_path' => $item_path]);
+                $shares = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                $share = $shares[0] ?? null;
+
+                if ($share) {
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+                    $host = $_SERVER['HTTP_HOST'];
+                    $base_uri = preg_replace('/\/system\/application$/', '', dirname($_SERVER['SCRIPT_NAME']));
+                    $share['url'] = $protocol . $host . $base_uri . "/share.php?id=" . $share['share_id'];
+                }
+
+                echo json_encode(['success' => true, 'share' => $share]);
+                break;
+
+            case 'create_share':
+                $item_path = $_POST['item_path'] ?? '';
+                $share_type = $_POST['share_type'] ?? 'public';
+                $password = $_POST['password'] ?? '';
+                $expires_at = $_POST['expires_at'] ?? null;
+                $recipient_ids = isset($_POST['recipients']) ? json_decode($_POST['recipients'], true) : [];
+
+                if (empty($item_path)) throw new Exception('共有するアイテムが指定されていません。');
+                
+                $source_full_path = getSafePath($user_dir, $item_path);
+                if (!file_exists($source_full_path)) throw new Exception('共有元のアイテムが見つかりません。');
+                
+                $stmt_delete = $db->prepare("DELETE FROM shares WHERE owner_user_id = :owner_user_id AND source_path = :source_path");
+                $stmt_delete->execute([':owner_user_id' => $_SESSION['user_id'], ':source_path' => $item_path]);
+
+                $share_id = bin2hex(random_bytes(8));
+                $password_hash = !empty($password) ? password_hash($password, PASSWORD_DEFAULT) : null;
+                
+                $db->beginTransaction();
+                try {
+                    $stmt = $db->prepare(
+                        "INSERT INTO shares (share_id, owner_user_id, source_path, share_type, password_hash, expires_at, created_at) 
+                        VALUES (:share_id, :owner_user_id, :source_path, :share_type, :password_hash, :expires_at, CURRENT_TIMESTAMP)"
+                    );
+                    $stmt->execute([
+                        ':share_id' => $share_id,
+                        ':owner_user_id' => $_SESSION['user_id'],
+                        ':source_path' => $item_path,
+                        ':share_type' => $share_type,
+                        ':password_hash' => $password_hash,
+                        ':expires_at' => empty($expires_at) ? null : $expires_at
+                    ]);
+                    $share_db_id = $db->lastInsertId();
+
+                    if ($share_type === 'private' && !empty($recipient_ids)) {
+                        $stmt_recipient = $db->prepare("INSERT INTO share_recipients (share_id, recipient_user_id) VALUES (:share_id, :recipient_user_id)");
+                        foreach ($recipient_ids as $recipient_id) {
+                            $stmt_recipient->execute([':share_id' => $share_db_id, ':recipient_user_id' => $recipient_id]);
+                        }
+                    }
+                    $db->commit();
+                } catch (Exception $e) {
+                    $db->rollBack();
+                    throw new Exception('データベースエラー: ' . $e->getMessage());
+                }
+                
+                $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+                $host = $_SERVER['HTTP_HOST'];
+                $base_uri = preg_replace('/\/system\/application$/', '', dirname($_SERVER['SCRIPT_NAME']));
+                $share_url = $protocol . $host . $base_uri . "/share.php?id=" . $share_id;
+
+                echo json_encode(['success' => true, 'message' => '共有リンクを作成・更新しました。', 'url' => $share_url, 'share_id' => $share_id]);
+                break;
+            
+            case 'delete_share':
+                $share_id = $_POST['share_id'] ?? '';
+                if (empty($share_id)) throw new Exception('共有IDが指定されていません。');
+                
+                $stmt = $db->prepare("DELETE FROM shares WHERE share_id = :share_id AND owner_user_id = :owner_user_id");
+                $stmt->execute([':share_id' => $share_id, ':owner_user_id' => $_SESSION['user_id']]);
+                
+                if ($stmt->rowCount() > 0) {
+                    echo json_encode(['success' => true, 'message' => '共有を停止しました。']);
+                } else {
+                    throw new Exception('共有の停止に失敗したか、権限がありません。');
+                }
+                break;
+                
             case 'upload':
                 if (empty($_FILES['files']['name'][0])) throw new Exception('アップロードされたファイルがありません。');
                 $total_size = array_sum($_FILES['files']['size']); if (getDirectorySize($user_dir) + $total_size > MAX_STORAGE_BYTES) throw new Exception('ストレージ容量不足です。');
@@ -348,7 +451,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#2b2b2b">
     <title>Explorer - <?php echo htmlspecialchars($username, ENT_QUOTES, 'UTF-8'); ?></title>
     <style>
         :root {
@@ -364,14 +466,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             --text-secondary-color: #c5c5c5;
             --accent-color: #4cc2ff;
         }
-        html, body {
-            margin: 0; padding: 0; width: 100%; height: 100%;
-            overflow: hidden;
-            font-family: var(--font-family);
-            font-size: 14px;
-            background: var(--bg-color);
-            color: var(--text-color);
-        }
+        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: var(--font-family); font-size: 14px; background: var(--bg-color); color: var(--text-color); }
+        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6); align-items: center; justify-content: center; }
+        .modal-content { background-color: var(--bg-header); padding: 20px; border: 1px solid var(--border-color); width: 90%; max-width: 600px; border-radius: 8px; position: relative; }
+        .modal-header { padding-bottom: 10px; border-bottom: 1px solid var(--border-color); margin-bottom: 15px; }
+        .modal-footer { padding-top: 15px; border-top: 1px solid var(--border-color); text-align: right; margin-top: 20px; display: flex; justify-content: space-between;}
+        .close-button { color: #aaa; position: absolute; top: 10px; right: 20px; font-size: 28px; font-weight: bold; }
+        .close-button:hover, .close-button:focus { color: white; text-decoration: none; cursor: pointer; }
+        .modal-body label, .modal-body p { margin: 10px 0 5px; display: block; }
+        .modal-body input[type="text"], .modal-body input[type="password"], .modal-body input[type="datetime-local"] { width: 100%; padding: 8px; background-color: var(--bg-tertiary-color); border: 1px solid var(--border-color); color: var(--text-color); border-radius: 4px; box-sizing: border-box; }
+        #user-search-results { max-height: 100px; overflow-y: auto; border: 1px solid var(--border-color); background: var(--bg-tertiary-color); margin-top: 5px; }
+        #user-search-results div { padding: 5px; cursor: pointer; }
+        #user-search-results div:hover { background-color: var(--bg-hover); }
+        #selected-recipients-list span { display: inline-block; background: var(--accent-color); color: black; padding: 2px 8px; margin: 2px; border-radius: 12px; font-size: 12px; }
+        #selected-recipients-list span button { background: none; border: none; color: black; font-weight: bold; cursor: pointer; padding-left: 6px; }
+        #stop-share-btn { background-color: #c00; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;}
+        #stop-share-btn:hover { background-color: #a00; }
+        #create-share-btn, #manage-shares-modal .button { background-color: var(--accent-color); color: black; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;}
+        #create-share-btn:hover, #manage-shares-modal .button:hover { opacity: 0.9; }
+        #manage-shares-modal table { width: 100%; margin-top: 10px; border-collapse: collapse; }
+        #manage-shares-modal th, #manage-shares-modal td { padding: 8px; border: 1px solid var(--border-color); text-align: left; word-break: break-all; }
+        #manage-shares-modal .stop-share-list-btn { font-size: 12px; padding: 4px 8px; background-color: #c00; color: white; border:none; border-radius:4px; cursor:pointer;}
         ::-webkit-scrollbar { width: 12px; }
         ::-webkit-scrollbar-track { background: var(--bg-color); }
         ::-webkit-scrollbar-thumb { background-color: #555; border-radius: 10px; border: 3px solid var(--bg-color); }
@@ -387,12 +502,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         .ribbon-group { display: flex; flex-direction: column; align-items: center; padding: 0 12px; }
         .ribbon-buttons { display: flex; align-items: flex-start; height: 100%; gap: 2px; }
         .ribbon-group .group-label { font-size: 12px; color: var(--text-secondary-color); margin-top: 4px; }
-        .toolbar button {
-            background: none; border: 1px solid transparent; color: var(--text-color);
-            padding: 4px; border-radius: 4px; cursor: pointer; display: flex;
-            flex-direction: column; align-items: center; justify-content: center;
-            gap: 4px; width: 70px; height: 60px; font-family: var(--font-family);
-        }
+        .toolbar button { background: none; border: 1px solid transparent; color: var(--text-color); padding: 4px; border-radius: 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: auto; min-width: 70px; height: 60px; font-family: var(--font-family); }
         .toolbar button.toggle-btn.active { background: var(--bg-selection); }
         .toolbar button:hover { background: var(--bg-hover); }
         .toolbar button:disabled { cursor: not-allowed; opacity: 0.4; }
@@ -401,40 +511,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         .ribbon-separator { width: 1px; background: var(--border-color); }
         .address-bar-container { display: flex; padding: 8px 12px; align-items: center; gap: 8px; }
         .address-bar-nav { display: flex; flex-direction: row; }
-        .address-bar-nav button {
-            background: none; border: 1px solid transparent; color: var(--text-color);
-            padding: 6px; border-radius: 4px; cursor: pointer; display: flex; align-items: center;
-        }
+        .address-bar-nav button { background: none; border: 1px solid transparent; color: var(--text-color); padding: 6px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; }
         .address-bar-nav button:not(:disabled):hover { background: var(--bg-hover); }
         .address-bar-nav button:disabled { opacity: 0.4; cursor: not-allowed; }
         .address-bar-nav .icon { width: 16px; height: 16px; }
-        .address-bar {
-            flex-grow: 1; display: flex; align-items: center;
-            background: var(--bg-tertiary-color); border: 1px solid var(--border-color);
-            border-radius: 4px; padding: 2px 4px;
-        }
+        .address-bar { flex-grow: 1; display: flex; align-items: center; background: var(--bg-tertiary-color); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 4px; }
         .address-bar-part { padding: 4px 8px; cursor: pointer; border-radius: 4px; white-space: nowrap; color: var(--text-secondary-color); }
         .address-bar-part:hover { background: var(--bg-hover); }
         .address-bar-separator { color: var(--text-secondary-color); padding: 0 4px; }
-        .address-input {
-            flex-grow: 1; background: var(--bg-tertiary-color); border: 1px solid var(--accent-color);
-            color: var(--text-color); padding: 6px 10px; outline: none; border-radius: 4px;
-        }
-        .search-box {
-            background: var(--bg-tertiary-color); border: 1px solid var(--border-color);
-            color: var(--text-color); border-radius: 4px; padding: 6px 10px; width: 200px;
-        }
+        .address-input { flex-grow: 1; background: var(--bg-tertiary-color); border: 1px solid var(--accent-color); color: var(--text-color); padding: 6px 10px; outline: none; border-radius: 4px; }
+        .search-box { background: var(--bg-tertiary-color); border: 1px solid var(--border-color); color: var(--text-color); border-radius: 4px; padding: 6px 10px; width: 200px; }
         .search-box:focus { border-color: var(--accent-color); }
         .main-content { flex: 1; display: flex; overflow: hidden; }
-        .nav-pane {
-            width: 240px; background: var(--bg-color); border-right: 1px solid var(--border-color);
-            padding: 8px; overflow-y: auto; user-select: none;
-        }
+        .nav-pane { width: 240px; background: var(--bg-color); border-right: 1px solid var(--border-color); padding: 8px; overflow-y: auto; user-select: none; }
         .nav-group-header { padding: 10px 4px 4px; font-size: 12px; color: var(--text-secondary-color); font-weight: bold; }
-        .nav-item {
-            padding: 6px 10px; border-radius: 4px; cursor: pointer; display: flex;
-            align-items: center; gap: 8px;
-        }
+        .nav-item { padding: 6px 10px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
         .nav-item:hover { background: var(--bg-hover); }
         .nav-item.selected { background: var(--bg-hover); }
         .nav-item.active { background: var(--bg-selection); }
@@ -449,16 +540,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         .grid-item .name { font-size: 12px; text-align: center; margin-top: 8px; word-break: break-all; }
         .file-table-view { flex: 1; overflow: auto; display: block;}
         .file-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        .file-table th {
-            background: rgba(31, 31, 31, 0.8); backdrop-filter: blur(10px);
-            padding: 8px 16px; text-align: left; font-weight: normal;
-            border-bottom: 1px solid var(--border-color); position: sticky; top: 0;
-            color: var(--text-secondary-color);
-        }
-        .file-table td {
-            padding: 8px 16px; border-bottom: 1px solid var(--border-color);
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default;
-        }
+        .file-table th { background: rgba(31, 31, 31, 0.8); backdrop-filter: blur(10px); padding: 8px 16px; text-align: left; font-weight: normal; border-bottom: 1px solid var(--border-color); position: sticky; top: 0; color: var(--text-secondary-color); }
+        .file-table td { padding: 8px 16px; border-bottom: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
         .file-item.cut, .grid-item.cut { opacity: 0.5; }
         .col-check { width: 40px; display: none; }
         .col-name { width: 50%; }
@@ -472,73 +555,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         .file-table tr.selected .path { color: #ccc; }
         .file-table tr.empty-message td { text-align: center; padding: 40px; color: var(--text-secondary-color); }
         .item-name-container { display: flex; align-items: center; gap: 8px; }
-        .item-name-container input {
-            background: var(--bg-color); color: var(--text-color);
-            border: 1px solid var(--accent-color); padding: 4px;
-            border-radius: 4px; outline: none; flex-grow: 1;
-        }
+        .item-name-container input { background: var(--bg-color); color: var(--text-color); border: 1px solid var(--accent-color); padding: 4px; border-radius: 4px; outline: none; flex-grow: 1; }
         .file-table .icon { width: 20px; height: 20px; flex-shrink: 0; }
-        #preview-pane {
-            display: none; width: 300px; flex-shrink: 0;
-            border-left: 1px solid var(--border-color);
-            padding: 16px; overflow-y: auto; text-align: center;
-        }
+        #preview-pane { display: none; width: 300px; flex-shrink: 0; border-left: 1px solid var(--border-color); padding: 16px; overflow-y: auto; text-align: center; }
         #preview-pane.active { display: block; }
         #preview-pane img, #preview-pane video { max-width: 100%; border-radius: 4px; }
         #preview-placeholder { color: var(--text-secondary-color); }
-        .status-bar {
-            padding: 4px 12px; background: var(--bg-secondary-color);
-            border-top: 1px solid var(--border-color); display: flex;
-            justify-content: space-between; align-items: center; font-size: 12px;
-        }
+        .status-bar { padding: 4px 12px; background: var(--bg-secondary-color); border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
         .usage-display { display: flex; align-items: center; gap: 8px; }
         .usage-bar { width: 150px; height: 14px; background: var(--bg-tertiary-color); border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color); }
         .usage-fill { height: 100%; background: var(--accent-color); width: 0%; transition: width 0.5s ease; }
-        #drag-drop-overlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.6); border: 2px dashed var(--accent-color);
-            display: none; justify-content: center; align-items: center;
-            font-size: 24px; color: var(--text-color); z-index: 9999; pointer-events: none;
-        }
+        #drag-drop-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); border: 2px dashed var(--accent-color); display: none; justify-content: center; align-items: center; font-size: 24px; color: var(--text-color); z-index: 9999; pointer-events: none; }
         #drag-drop-overlay.visible { display: flex; }
-        .context-menu {
-            position: fixed; z-index: 1000; background: #2b2b2b;
-            border: 1px solid #454545; min-width: 250px; padding: 4px;
-            box-shadow: 0 8px 16px rgba(0,0,0,0.4); border-radius: 8px;
-        }
-        .context-menu-item {
-            padding: 6px 12px; cursor: pointer; white-space: nowrap;
-            display: flex; justify-content: space-between; align-items: center;
-            user-select: none; border-radius: 4px;
-        }
-        .context-menu-item.disabled {
-            opacity: 0.5;
-            cursor: default;
-            background: none !important;
-        }
+        .context-menu { position: fixed; z-index: 1001; background: #2b2b2b; border: 1px solid #454545; min-width: 250px; padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); border-radius: 8px; }
+        .context-menu-item { padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; justify-content: space-between; align-items: center; user-select: none; border-radius: 4px; }
+        .context-menu-item.disabled { opacity: 0.5; cursor: default; background: none !important; }
         .context-menu-item:not(.disabled):hover { background: var(--bg-hover); }
         .context-menu-item .label { display: flex; align-items: center; gap: 12px; }
         .context-menu-item .icon { width: 16px; height: 16px; fill: var(--text-color); }
         .context-menu-item .hint { color: var(--text-secondary-color); font-size: 12px; }
         .context-menu-separator { height: 1px; background: #454545; margin: 4px; }
-        .context-menu-item.has-submenu::after {
-            content: '▶';
-            font-size: 10px;
-        }
-        .submenu {
-            display: none; position: fixed;
-            background: #2b2b2b; border: 1px solid #454545;
-            min-width: 180px; padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.4);
-            border-radius: 8px; z-index: 1001;
-        }
+        .context-menu-item.has-submenu::after { content: '▶'; font-size: 10px; }
+        .submenu { display: none; position: fixed; background: #2b2b2b; border: 1px solid #454545; min-width: 180px; padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); border-radius: 8px; z-index: 1002; }
         .context-menu-item:hover > .submenu { display: block; }
-        #selection-rectangle {
-            position: absolute;
-            border: 1px solid var(--accent-color);
-            background-color: rgba(76, 194, 255, 0.2);
-            pointer-events: none;
-            z-index: 999;
-        }
+        #selection-rectangle { position: absolute; border: 1px solid var(--accent-color); background-color: rgba(76, 194, 255, 0.2); pointer-events: none; z-index: 999; }
     </style>
 </head>
 <body>
@@ -547,7 +587,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             <div class="header-tabs">
                 <div class="tab-item" data-toolbar="file-toolbar">ファイル</div>
                 <div class="tab-item active" data-toolbar="home-toolbar">ホーム</div>
-                <div class="tab-item" data-toolbar="">共有</div>
+                <div class="tab-item" data-toolbar="share-toolbar">共有</div>
                 <div class="tab-item" data-toolbar="view-toolbar">表示</div>
             </div>
             <div id="file-toolbar" class="toolbar">
@@ -556,7 +596,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                          <button id="upload-file-btn"><span class="icon" id="icon-upload-file"></span><span class="label">ファイル</span></button>
                          <button id="upload-folder-btn"><span class="icon" id="icon-upload-folder"></span><span class="label">フォルダー</span></button>
                     </div>
-                    <span class="group-label">アップロード</span>
                 </div>
             </div>
             <div id="home-toolbar" class="toolbar active">
@@ -566,7 +605,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                         <button id="copy-btn" disabled><span class="icon" id="icon-copy"></span><span class="label">コピー</span></button>
                         <button id="cut-btn" disabled><span class="icon" id="icon-cut"></span><span class="label">切り取り</span></button>
                     </div>
-                    <span class="group-label">クリップボード</span>
                 </div>
                 <div class="ribbon-separator"></div>
                 <div class="ribbon-group">
@@ -574,14 +612,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                          <button id="delete-btn" disabled><span class="icon" id="icon-delete"></span><span class="label">削除</span></button>
                          <button id="rename-btn" disabled><span class="icon" id="icon-rename"></span><span class="label">名前の変更</span></button>
                     </div>
-                    <span class="group-label">整理</span>
                 </div>
                 <div class="ribbon-separator"></div>
                 <div class="ribbon-group">
                     <div class="ribbon-buttons">
                          <button id="new-folder-btn"><span class="icon" id="icon-new-folder"></span><span class="label">新しいフォルダー</span></button>
                     </div>
-                    <span class="group-label">新規</span>
+                </div>
+            </div>
+            <div id="share-toolbar" class="toolbar">
+                <div class="ribbon-group">
+                    <div class="ribbon-buttons">
+                         <button id="share-btn" disabled><span class="icon" id="icon-share"></span><span class="label">選択項目<br>の共有</span></button>
+                         <button id="manage-shares-btn"><span class="icon" id="icon-share-manage"></span><span class="label">共有の<br>管理</span></button>
+                    </div>
                 </div>
             </div>
             <div id="view-toolbar" class="toolbar">
@@ -589,7 +633,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     <div class="ribbon-buttons">
                         <button id="preview-pane-btn" class="toggle-btn"><span class="icon" id="icon-preview-pane"></span><span class="label">プレビュー</span></button>
                     </div>
-                     <span class="group-label">ペイン</span>
                 </div>
                 <div class="ribbon-separator"></div>
                 <div class="ribbon-group">
@@ -597,14 +640,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                         <button id="large-icons-btn" class="layout-btn"><span class="icon" id="icon-large-icons"></span><span class="label">大アイコン</span></button>
                         <button id="details-btn" class="layout-btn active"><span class="icon" id="icon-details"></span><span class="label">詳細</span></button>
                     </div>
-                    <span class="group-label">レイアウト</span>
                 </div>
                  <div class="ribbon-separator"></div>
                 <div class="ribbon-group">
                      <div class="ribbon-buttons">
-                        <button id="item-checkboxes-btn" class="toggle-btn"><span class="icon" id="icon-checkboxes"></span><span class="label">チェックボックス</span></button>
+                        <button id="item-checkboxes-btn" class="toggle-btn"><span class="icon" id="icon-checkboxes"></span><span class="label">チェック<br>ボックス</span></button>
                     </div>
-                    <span class="group-label">表示/非表示</span>
                 </div>
             </div>
             <div class="address-bar-container">
@@ -650,589 +691,849 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             </div>
         </div>
     </div>
+    
+    <div id="share-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <span class="close-button" id="close-share-modal">&times;</span>
+          <h2 id="share-modal-title">アイテムを共有</h2>
+        </div>
+        <div class="modal-body">
+            <p>共有設定:</p>
+            <div>
+                <input type="radio" id="share-type-public" name="share-type" value="public" checked>
+                <label for="share-type-public">リンクを知っている全員</label>
+            </div>
+            <div>
+                <input type="radio" id="share-type-private" name="share-type" value="private">
+                <label for="share-type-private">特定のユーザー</label>
+            </div>
+            <div id="private-share-options" style="display:none; margin-top:10px;">
+                <label for="share-recipients-input">ユーザーを検索:</label>
+                <input type="text" id="share-recipients-input" placeholder="ユーザー名で検索...">
+                <div id="user-search-results"></div>
+                <p>共有相手:</p>
+                <div id="selected-recipients-list"></div>
+            </div>
+            <div style="margin-top:10px;">
+                <label for="share-password">パスワード (任意):</label>
+                <input type="password" id="share-password" autocomplete="new-password">
+            </div>
+            <div style="margin-top:10px;">
+                <label for="share-expires">有効期限 (任意):</label>
+                <input type="datetime-local" id="share-expires">
+            </div>
+            <hr style="margin: 20px 0;">
+            <p>生成されたリンク:</p>
+            <input type="text" id="share-link-input" readonly>
+        </div>
+        <div class="modal-footer">
+          <button id="stop-share-btn" style="display: none;">共有を停止</button>
+          <button id="create-share-btn">リンクを作成・更新</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="manage-shares-modal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <span class="close-button" id="close-manage-shares-modal">&times;</span>
+          <h2>共有の管理</h2>
+        </div>
+        <div class="modal-body">
+            <table id="manage-shares-table">
+                <thead>
+                    <tr>
+                        <th>アイテムパス</th>
+                        <th>共有方法</th>
+                        <th>パスワード</th>
+                        <th>有効期限</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="manage-shares-list">
+                </tbody>
+            </table>
+        </div>
+      </div>
+    </div>
+
     <input type="file" id="file-input" multiple hidden><input type="file" id="folder-input" webkitdirectory directory multiple hidden>
     <div id="drag-drop-overlay">ファイルをここにドロップ</div>
     <script>
-    document.addEventListener('DOMContentLoaded', () => {
-        const getEl = (id) => document.getElementById(id);
-        const addEventListenerIfPresent = (id, event, handler) => {
-            const el = getEl(id);
-            if (el) el.addEventListener(event, handler);
-        };
-        const fileListBody = getEl('file-list-body');
-        const itemCountEl = getEl('item-count');
-        const dragDropOverlay = getEl('drag-drop-overlay');
-        const addressBar = getEl('address-bar');
-        const navBackBtn = getEl('nav-back-btn');
-        const navUpBtn = getEl('nav-up-btn');
-        const navForwardBtn = getEl('nav-forward-btn');
-        const fileInput = getEl('file-input');
-        const folderInput = getEl('folder-input');
-        const usageFill = getEl('usage-fill');
-        const usageText = getEl('usage-text');
-        const searchBox = getEl('search-box');
-        const addressInput = getEl('address-input');
-        const navPane = getEl('nav-pane');
-        const favoritesListEl = getEl('favorites-list');
-        const fileTableView = getEl('file-table-view');
-        const fileGridView = getEl('file-grid-view');
-        const previewPane = getEl('preview-pane');
-        const previewPlaceholder = getEl('preview-placeholder');
-        const previewContent = getEl('preview-content');
-        const explorerContainer = document.querySelector('.explorer-container');
-        const contentArea = getEl('content-area');
-        const selectionRectangle = getEl('selection-rectangle');
-        let currentPath = '/', selectedItems = new Map(), contextMenu = null, isSearchMode = false, favorites = [], currentLayout = 'details';
-        let clipboard = { type: null, items: [] };
-        let isSelecting = false, startX = 0, startY = 0, contentAreaRect;
-
-        const history = { past: [], future: [] };
-        const ICONS = {
-            'back': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L4.81 7.5h8.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06z"/></svg>',
-            'forward': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M8.22 3.47a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06l2.97-2.97H2.75a.75.75 0 0 1 0-1.5h8.44L8.22 4.53a.75.75 0 0 1 0-1.06z"/></svg>',
-            'up': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M8 3.25a.75.75 0 0 1 .75.75v8.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V4a.75.75 0 0 1 .75-.75z"/></svg>',
-            'paste': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>',
-            'copy': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>',
-            'cut': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M9.64 7.64c.2-.2.2-.51 0-.71L8.35 5.64c-.2-.2-.51-.2-.71 0L4 9.29V5c0-1.1-.9-2-2-2s-2 .9-2 2v14c0 1.1.9 2 2 2h4v-3.29l3.64-3.64-1-1.01L7.35 15.35l-1.41-1.41 4.24-4.24-1-1.01L7.83 12.05l-1.41-1.41 3.22-3.22zm4.07-4.07c.2-.2.51-.2.71 0l1.29 1.29c.2.2.2.51 0 .71L11.35 9.9c-.2.2-.51.2-.71 0l-1.29-1.29a.512.512 0 0 1 0-.71l4.36-4.35zM22 10h-4c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2v-4c0-1.1-.9-2-2-2zm0 6h-4v-4h4v4z"/></svg>',
-            'rename': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83zM3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM5.92 19H5v-.92l9.06-9.06.92.92L5.92 19z"/></svg>',
-            'delete': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
-            'new-folder': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm0 12H4V6h5.17l2 2H20v10zm-8-4h2v2h-2v-2zm-4 0h2v2H8v-2zm8 0h2v2h-2v-2z"/></svg>',
-            'upload-file': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg>',
-            'upload-folder': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M11 5c0-1.1.9-2 2-2h6c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H3c-1.1 0-2-.9-2-2V7c0-1.1.9-2 2-2h5l2 2h3z"/></svg>',
-            'folder': '<svg fill="#FFCA28" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>',
-            'file': '<svg fill="#E0E0E0" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>',
-            'user-folder': '<svg fill="#FFCA28" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>',
-            'preview-pane': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 16H6c-.55 0-1-.45-1-1V6c0-.55.45-1 1-1h12c.55 0 1 .45 1 1v12c0 .55-.45 1-1 1zm-4-4h-4v-2h4v2z"/></svg>',
-            'large-icons': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M3 11h8V3H3v8zm0 10h8v-8H3v8zM13 3v8h8V3h-8zm0 10h8v-8h-8v8z"/></svg>',
-            'details': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M3 15h18v-2H3v2zm0 4h18v-2H3v2zm0-8h18V9H3v2zm0-6v2h18V5H3z"/></svg>',
-            'checkboxes': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
-        };
-        Object.keys(ICONS).forEach(id => {
-            const el = getEl(`icon-${id}`);
-            if (el) el.innerHTML = ICONS[id];
-        });
-        const apiCall = async (action, formData) => {
-            try {
-                if (!formData.has('action')) { formData.append('action', action); }
-                const response = await fetch('', { method: 'POST', body: formData });
-                if (!response.ok) {
-                    const err = await response.json().catch(() => ({}));
-                    throw new Error(err.message || `サーバーエラー: ${response.status}`);
-                }
-                const text = await response.text();
-                if(!text) return null;
-                return JSON.parse(text);
-            } catch (error) {
-                console.error(`API Call Error (${action}):`, error);
-                alert(`エラー: ${error.message}`);
-                return null;
-            }
-        };
-        const updateAddressBar = (path) => {
-            addressBar.innerHTML = '';
-            const homeIconSvg = '<svg fill="currentColor" viewBox="0 0 16 16" style="width:16px; height:16px; margin-right:4px;"><path d="M8 1.75a.75.75 0 0 1 .53.22l5.25 5.25a.75.75 0 0 1-1.06 1.06L12 7.78V14a.75.75 0 0 1-1.5 0V9h-1v5a.75.75 0 0 1-1.5 0V7.78L4.28 8.53a.75.75 0 0 1-1.06-1.06l5.25-5.25A.75.75 0 0 1 8 1.75z"/></svg>';
-            const homePart = document.createElement('span');
-            homePart.className = 'address-bar-part';
-            homePart.innerHTML = homeIconSvg;
-            homePart.onclick = () => navigateTo('/');
-            addressBar.appendChild(homePart);
-            const parts = path.split('/').filter(p => p);
-            let currentBuildPath = '';
-            parts.forEach(part => {
-                addressBar.insertAdjacentHTML('beforeend', '<span class="address-bar-separator">&gt;</span>');
-                currentBuildPath += `/${part}`;
-                const partEl = document.createElement('span');
-                partEl.className = 'address-bar-part';
-                partEl.textContent = part;
-                partEl.dataset.path = currentBuildPath;
-                partEl.onclick = () => navigateTo(partEl.dataset.path);
-                addressBar.appendChild(partEl);
+        document.addEventListener('DOMContentLoaded', () => {
+            const getEl = (id) => document.getElementById(id);
+            const addEventListenerIfPresent = (id, event, handler) => {
+                const el = getEl(id);
+                if (el) el.addEventListener(event, handler);
+            };
+            const fileListBody = getEl('file-list-body');
+            const itemCountEl = getEl('item-count');
+            const dragDropOverlay = getEl('drag-drop-overlay');
+            const addressBar = getEl('address-bar');
+            const navBackBtn = getEl('nav-back-btn');
+            const navUpBtn = getEl('nav-up-btn');
+            const navForwardBtn = getEl('nav-forward-btn');
+            const fileInput = getEl('file-input');
+            const folderInput = getEl('folder-input');
+            const usageFill = getEl('usage-fill');
+            const usageText = getEl('usage-text');
+            const searchBox = getEl('search-box');
+            const addressInput = getEl('address-input');
+            const navPane = getEl('nav-pane');
+            const favoritesListEl = getEl('favorites-list');
+            const fileTableView = getEl('file-table-view');
+            const fileGridView = getEl('file-grid-view');
+            const previewPane = getEl('preview-pane');
+            const previewPlaceholder = getEl('preview-placeholder');
+            const previewContent = getEl('preview-content');
+            const explorerContainer = document.querySelector('.explorer-container');
+            const contentArea = getEl('content-area');
+            const selectionRectangle = getEl('selection-rectangle');
+            const shareModal = getEl('share-modal');
+            const manageSharesModal = getEl('manage-shares-modal');
+            const shareBtn = getEl('share-btn');
+            const manageSharesBtn = getEl('manage-shares-btn');
+            const closeShareModalBtn = getEl('close-share-modal');
+            const closeManageSharesModalBtn = getEl('close-manage-shares-modal');
+            const createShareBtn = getEl('create-share-btn');
+            const stopShareBtn = getEl('stop-share-btn');
+            const shareModalTitle = getEl('share-modal-title');
+            const shareLinkInput = getEl('share-link-input');
+            const privateShareOptions = getEl('private-share-options');
+            const recipientsInput = getEl('share-recipients-input');
+            const userSearchResults = getEl('user-search-results');
+            const selectedRecipientsList = getEl('selected-recipients-list');
+            const sharePasswordField = getEl('share-password');
+            const shareExpiresField = getEl('share-expires');
+            let selectedRecipients = new Map();
+            let currentShareId = null;
+            let currentPath = '/', selectedItems = new Map(), contextMenu = null, isSearchMode = false, favorites = [], currentLayout = 'details';
+            let clipboard = { type: null, items: [] };
+            let isSelecting = false, startX = 0, startY = 0, contentAreaRect;
+            const history = { past: [], future: [] };
+            const ICONS = {
+                'back': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L4.81 7.5h8.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06z"/></svg>',
+                'forward': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M8.22 3.47a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06l2.97-2.97H2.75a.75.75 0 0 1 0-1.5h8.44L8.22 4.53a.75.75 0 0 1 0-1.06z"/></svg>',
+                'up': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M8 3.25a.75.75 0 0 1 .75.75v8.19l2.22-2.22a.75.75 0 1 1 1.06 1.06l-3.5 3.5a.75.75 0 0 1-1.06 0l-3.5-3.5a.75.75 0 1 1 1.06-1.06l2.22 2.22V4a.75.75 0 0 1 .75-.75z"/></svg>',
+                'paste': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 2h-4.18C14.4.84 13.3 0 12 0S9.6.84 9.18 2H5c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-7 0c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zm7 18H5V4h2v3h10V4h2v16z"/></svg>',
+                'copy': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>',
+                'cut': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M9.64 7.64c.2-.2.2-.51 0-.71L8.35 5.64c-.2-.2-.51-.2-.71 0L4 9.29V5c0-1.1-.9-2-2-2s-2 .9-2 2v14c0 1.1.9 2 2 2h4v-3.29l3.64-3.64-1-1.01L7.35 15.35l-1.41-1.41 4.24-4.24-1-1.01L7.83 12.05l-1.41-1.41 3.22-3.22zm4.07-4.07c.2-.2.51-.2.71 0l1.29 1.29c.2.2.2.51 0 .71L11.35 9.9c-.2.2-.51.2-.71 0l-1.29-1.29a.512.512 0 0 1 0-.71l4.36-4.35zM22 10h-4c-1.1 0-2 .9-2 2v4c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2v-4c0-1.1-.9-2-2-2zm0 6h-4v-4h4v4z"/></svg>',
+                'rename': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83zM3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM5.92 19H5v-.92l9.06-9.06.92.92L5.92 19z"/></svg>',
+                'delete': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
+                'new-folder': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm0 12H4V6h5.17l2 2H20v10zm-8-4h2v2h-2v-2zm-4 0h2v2H8v-2zm8 0h2v2h-2v-2z"/></svg>',
+                'upload-file': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg>',
+                'upload-folder': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M11 5c0-1.1.9-2 2-2h6c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H3c-1.1 0-2-.9-2-2V7c0-1.1.9-2 2-2h5l2 2h3z"/></svg>',
+                'folder': '<svg fill="#FFCA28" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>',
+                'file': '<svg fill="#E0E0E0" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>',
+                'user-folder': '<svg fill="#FFCA28" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>',
+                'preview-pane': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-1 16H6c-.55 0-1-.45-1-1V6c0-.55.45-1 1-1h12c.55 0 1 .45 1 1v12c0 .55-.45 1-1 1zm-4-4h-4v-2h4v2z"/></svg>',
+                'large-icons': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M3 11h8V3H3v8zm0 10h8v-8H3v8zM13 3v8h8V3h-8zm0 10h8v-8h-8v8z"/></svg>',
+                'details': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M3 15h18v-2H3v2zm0 4h18v-2H3v2zm0-8h18V9H3v2zm0-6v2h18V5H3z"/></svg>',
+                'checkboxes': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-9 14l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>',
+                'share': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92 1.61 0 2.92-1.31 2.92-2.92s-1.31-2.92-2.92-2.92z"/></svg>',
+                'share-manage': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-4H6v-2h12v2zm0-4H6V8h12v2z"/></svg>'
+            };
+            Object.keys(ICONS).forEach(id => {
+                const el = getEl(`icon-${id}`);
+                if (el) el.innerHTML = ICONS[id];
             });
-        };
-        const updateUsage = async () => {
-            const data = await apiCall('get_usage', new FormData());
-            if(data && data.success) {
-                const percentage = data.total > 0 ? (data.used / data.total) * 100 : 0;
-                usageFill.style.width = `${Math.min(percentage, 100)}%`;
-                usageText.textContent = `${data.used_formatted} / ${data.total_formatted}`;
-            }
-        };
-        const updateSelection = () => {
-            document.querySelectorAll('.file-item.selected, .grid-item.selected').forEach(el => el.classList.remove('selected'));
-            document.querySelectorAll('.file-item.cut, .grid-item.cut').forEach(el => el.classList.remove('cut'));
-
-            selectedItems.forEach((_, key) => {
-                document.querySelectorAll(`[data-path="${CSS.escape(key)}"]`).forEach(el => el.classList.add('selected'));
-            });
-            if (clipboard.type === 'cut') {
-                clipboard.items.forEach(item => {
-                    document.querySelectorAll(`[data-path="${CSS.escape(item.path)}"]`).forEach(el => el.classList.add('cut'));
-                });
-            }
-            const hasSelection = selectedItems.size > 0;
-            const hasSystemFile = Array.from(selectedItems.values()).some(file => file.is_system);
-            
-            getEl('delete-btn').disabled = !hasSelection || hasSystemFile;
-            getEl('rename-btn').disabled = selectedItems.size !== 1 || hasSystemFile;
-            getEl('copy-btn').disabled = !hasSelection;
-            getEl('cut-btn').disabled = !hasSelection || hasSystemFile;
-            getEl('paste-btn').disabled = clipboard.items.length === 0;
-
-            const totalItems = document.querySelectorAll('.file-item, .grid-item').length;
-            itemCountEl.textContent = selectedItems.size > 0 ? `${selectedItems.size} 個の項目を選択` : `${totalItems} 項目`;
-        };
-        const navigateTo = (path, fromHistory = false) => {
-            if (currentPath === path && !fromHistory) return;
-            if (!fromHistory) {
-                if(currentPath !== path) history.past.push(currentPath);
-                history.future = [];
-            }
-            currentPath = path;
-            selectedItems.clear();
-            searchBox.value = '';
-            isSearchMode = false;
-            loadDirectory(path);
-            updateNavButtons();
-        };
-        const updateNavButtons = () => {
-            navBackBtn.disabled = history.past.length === 0;
-            navForwardBtn.disabled = history.future.length === 0;
-            navUpBtn.disabled = currentPath === '/';
-        };
-        const renderItems = (files, isSearch = false) => {
-            fileListBody.innerHTML = '';
-            fileGridView.innerHTML = '';
-            if (files.length === 0) {
-                 if (!isSearch) {
-                    fileListBody.innerHTML = '<tr class="empty-message"><td colspan="5">このフォルダーは空です。</td></tr>';
-                 }
-            } else {
-                files.forEach(file => {
-                    const filePath = file.path || (currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`);
-                    const row = document.createElement('tr');
-                    row.className = `file-item ${isSearch ? 'search-result' : ''}`;
-                    row.dataset.path = filePath;
-                    row.dataset.name = file.name;
-                    row.dataset.isDir = file.is_dir;
-                    row.dataset.isSystem = file.is_system;
-                    let nameCellHTML = `<div class="item-name-container"><span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="item-name">${file.name}</span></div>`;
-                    if (isSearch) { nameCellHTML += `<div class="path">${filePath}</div>`; }
-                    const checkboxHTML = `<td class="col-check"><input type="checkbox" class="item-checkbox" data-path="${filePath}"></td>`;
-                    if (file.is_system) {
-                        row.innerHTML = `${checkboxHTML}<td class="col-name">${nameCellHTML}</td><td class="col-modified"></td><td class="col-type"><span style="color: var(--text-secondary-color);">SYSTEM FILE</span></td><td class="col-size"></td>`;
-                    } else {
-                        row.innerHTML = `${checkboxHTML}<td class="col-name">${nameCellHTML}</td><td class="col-modified">${file.modified}</td><td class="col-type">${file.type}</td><td class="col-size">${file.size}</td>`;
+            const apiCall = async (action, formData) => {
+                try {
+                    formData.append('action', action);
+                    const response = await fetch('', { method: 'POST', body: formData });
+                    if (!response.ok) {
+                        const err = await response.json().catch(() => ({}));
+                        throw new Error(err.message || `サーバーエラー: ${response.status}`);
                     }
-                    fileListBody.appendChild(row);
-                    const gridItem = document.createElement('div');
-                    gridItem.className = 'grid-item';
-                    gridItem.dataset.path = filePath;
-                    gridItem.dataset.name = file.name;
-                    gridItem.dataset.isDir = file.is_dir;
-                    gridItem.dataset.isSystem = file.is_system;
-                    gridItem.innerHTML = `<span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="name">${file.name}</span>`;
-                    fileGridView.appendChild(gridItem);
-                    [row, gridItem].forEach(el => {
-                        el.addEventListener('click', e => handleItemClick(e, file, el));
-                        el.addEventListener('dblclick', () => handleItemDblClick(file, filePath));
-                        el.addEventListener('contextmenu', e => handleItemContextMenu(e, file, el));
-                    });
-                });
-            }
-            updateSelection();
-        };
-        const loadDirectory = async (path) => {
-            const formData = new FormData(); formData.append('path', path);
-            const data = await apiCall('list', formData);
-            if (!data || !data.success) { if (path !== '/') navigateTo('/'); return; }
-            isSearchMode = false;
-            addressBar.style.display = 'flex';
-            addressInput.style.display = 'none';
-            searchBox.style.display = 'block';
-            updateAddressBar(data.path);
-            renderItems(data.files, false);
-            updateUsage();
-            navPane.querySelectorAll('.nav-item').forEach(item => {
-                if(item.dataset.path === path) item.classList.add('active');
-                else item.classList.remove('active');
-            });
-        };
-        const handleItemClick = (e, file, element) => {
-            e.stopPropagation();
-            hideContextMenu();
-            const itemPath = element.dataset.path;
-            const fileData = { path: itemPath, name: file.name, is_dir: file.is_dir, is_system: file.is_system };
-            if (e.target.type === 'checkbox') {
-                 e.target.checked ? selectedItems.set(itemPath, fileData) : selectedItems.delete(itemPath);
-            } else if (e.ctrlKey) {
-                selectedItems.has(itemPath) ? selectedItems.delete(itemPath) : selectedItems.set(itemPath, fileData);
-            } else if (e.shiftKey && selectedItems.size > 0) {
-                selectedItems.clear();
-                selectedItems.set(itemPath, fileData);
-            } else {
-                selectedItems.clear();
-                selectedItems.set(itemPath, fileData);
-            }
-            updateSelection();
-            showPreview();
-        };
-        const handleItemDblClick = (file, path) => { file.is_dir ? navigateTo(path) : downloadFile(path); };
-        const handleItemContextMenu = (e, file, row) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const itemPath = row.dataset.path;
-            const fileData = { path: itemPath, name: file.name, is_dir: file.is_dir, is_system: file.is_system };
-            if (!selectedItems.has(itemPath)) {
-                selectedItems.clear();
-                selectedItems.set(itemPath, fileData);
-                updateSelection();
-            }
-            showContextMenu(e, fileData, row);
-        };
-        const positionMenu = (menu, x, y, parentElement = null) => {
-            const menuRect = menu.getBoundingClientRect();
-            let newX = x, newY = y;
-            if (parentElement) {
-                const parentRect = parentElement.getBoundingClientRect();
-                newX = parentRect.right;
-                if (newX + menuRect.width > window.innerWidth) newX = parentRect.left - menuRect.width;
-                newY = parentRect.top;
-            } else {
-                 if (newX + menuRect.width > window.innerWidth) newX = window.innerWidth - menuRect.width - 5;
-            }
-            if (newY + menuRect.height > window.innerHeight) newY = window.innerHeight - menuRect.height - 5;
-            if (newX < 0) newX = 5; if (newY < 0) newY = 5;
-            menu.style.left = `${newX}px`; menu.style.top = `${newY}px`;
-        };
-        const showContextMenu = (e, fileInfo, element) => {
-            hideContextMenu();
-            contextMenu = document.createElement('div');
-            contextMenu.className = 'context-menu';
-            document.body.appendChild(contextMenu);
-
-            const hasSelection = selectedItems.size > 0;
-            const canPaste = clipboard.items.length > 0;
-            
-            let menuItemsHTML = '';
-            if (fileInfo) { // Item context menu
-                const isSystem = fileInfo.is_system;
-                const openActionText = fileInfo.is_dir ? '開く' : 'ダウンロード';
-                menuItemsHTML += `<div class="context-menu-item" data-action="open"><span class="label">${openActionText}</span></div>`;
-                if (!fileInfo.is_dir) menuItemsHTML += `<div class="context-menu-item has-submenu"><span class="label">アプリで開く</span><div class="submenu"><div class="context-menu-item" data-action="open-with-notepad"><span class="label">Notepad</span></div></div></div>`;
-
-                if (!isSystem) {
-                    if (fileInfo.is_dir) {
-                        const isFavorite = favorites.some(fav => fav.path === element.dataset.path);
-                        menuItemsHTML += `<div class="context-menu-item" data-action="${isFavorite ? 'remove_favorite' : 'add_favorite'}"><span class="label">${isFavorite ? 'お気に入りから削除' : 'お気に入りに追加'}</span></div>`;
-                    }
-                    menuItemsHTML += `<div class="context-menu-separator"></div>`;
-                    menuItemsHTML += `<div class="context-menu-item" data-action="cut"><span class="label">切り取り</span></div>`;
-                    menuItemsHTML += `<div class="context-menu-separator"></div>`;
-                    menuItemsHTML += `<div class="context-menu-item" data-action="delete"><span class="label">削除</span></div>`;
-                    menuItemsHTML += `<div class="context-menu-item" data-action="rename"><span class="label">名前の変更</span></div>`;
-                }
-
-            } else { // View context menu
-                menuItemsHTML += `<div class="context-menu-item ${canPaste ? '' : 'disabled'}" data-action="paste"><span class="label">貼り付け</span></div>`;
-                menuItemsHTML += `<div class="context-menu-separator"></div>`;
-                menuItemsHTML += `<div class="context-menu-item has-submenu"><span class="label">新規作成</span><div class="submenu"><div class="context-menu-item" data-action="create_folder"><span class="label">フォルダー</span></div><div class="context-menu-item" data-action="create_file"><span class="label">テキスト ドキュメント</span></div></div></div>`;
-                menuItemsHTML += `<div class="context-menu-separator"></div>`;
-                menuItemsHTML += `<div class="context-menu-item" data-action="copy_path"><span class="label">パスのコピー</span></div>`;
-            }
-
-            contextMenu.innerHTML = menuItemsHTML;
-            positionMenu(contextMenu, e.clientX, e.clientY);
-            contextMenu.addEventListener('click', ev => {
-                const item = ev.target.closest('.context-menu-item');
-                if (item && !item.classList.contains('has-submenu') && !item.classList.contains('disabled')) {
-                    handleContextMenuAction(item.dataset.action, fileInfo, element);
-                }
-            });
-            contextMenu.querySelectorAll('.has-submenu').forEach(item => {
-                item.addEventListener('mouseenter', () => {
-                    const submenu = item.querySelector('.submenu');
-                    if (submenu) positionMenu(submenu, 0, 0, item);
-                });
-            });
-        };
-        const hideContextMenu = () => { if (contextMenu) contextMenu.remove(); contextMenu = null; };
-        const handleContextMenuAction = (action, fileInfo, element) => {
-            hideContextMenu();
-            const itemPath = element ? element.dataset.path : null;
-            switch (action) {
-                case 'open': fileInfo.is_dir ? navigateTo(itemPath) : downloadFile(itemPath); break;
-                case 'open-with-notepad': window.parent.postMessage({ type: 'openWithApp', app: 'notepad', filePath: itemPath }, '*'); break;
-                case 'rename': initiateRename(element); break;
-                case 'delete': deleteItems(); break;
-                case 'cut': cutItems(); break;
-                case 'paste': pasteItems(); break;
-                case 'add_favorite': addFavorite(itemPath, fileInfo.name); break;
-                case 'remove_favorite': removeFavorite(itemPath); break;
-                case 'copy_path': copyToClipboard(currentPath); break;
-                case 'create_file': createNewFile(); break;
-                case 'create_folder': createFolder(); break;
-            }
-        };
-        const initiateRename = (rowElement) => {
-            const nameContainer = rowElement.querySelector('.item-name-container');
-            const nameSpan = nameContainer.querySelector('.item-name');
-            if (!nameSpan || nameContainer.querySelector('input')) return;
-            const oldName = nameSpan.textContent;
-            nameSpan.style.display = 'none';
-            const input = document.createElement('input'); input.type = 'text'; input.value = oldName;
-            const finishRename = async () => {
-                input.removeEventListener('blur', finishRename); input.removeEventListener('keydown', keydownHandler);
-                const newName = input.value.trim();
-                nameSpan.style.display = ''; input.remove();
-                if (newName && newName !== oldName) {
-                    const formData = new FormData(); formData.append('item_path', rowElement.dataset.path); formData.append('new_name', newName);
-                    const result = await apiCall('rename', formData);
-                    if (result && result.success) isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath);
+                    const text = await response.text();
+                    if(!text) return null;
+                    return JSON.parse(text);
+                } catch (error) {
+                    console.error(`API Call Error (${action}):`, error);
+                    alert(`エラー: ${error.message}`);
+                    return null;
                 }
             };
-            const keydownHandler = e => { if (e.key === 'Enter') finishRename(); else if (e.key === 'Escape') { input.removeEventListener('blur', finishRename); nameSpan.style.display = ''; input.remove(); } };
-            input.addEventListener('blur', finishRename); input.addEventListener('keydown', keydownHandler);
-            nameContainer.appendChild(input); input.focus(); input.select();
-        };
-        const uploadFiles = async (files, isFolder = false) => {
-            const formData = new FormData(); formData.append('path', currentPath);
-            const relativePaths = [];
-            for (const file of files) { formData.append('files[]', file, file.name); if (isFolder && file.webkitRelativePath) relativePaths.push(file.webkitRelativePath); }
-            if (isFolder) formData.append('relative_paths', JSON.stringify(relativePaths));
-            const result = await apiCall('upload', formData);
-            if (result && result.success) loadDirectory(currentPath);
-        };
-        const createFolder = async () => {
-            const name = prompt('新しいフォルダ名:', '新しいフォルダー'); if (!name) return;
-            const formData = new FormData(); formData.append('path', currentPath); formData.append('name', name);
-            const result = await apiCall('create_folder', formData);
-            if (result && result.success) loadDirectory(currentPath);
-        };
-        const createNewFile = async () => {
-            const name = prompt('新しいファイル名:', '新規テキストドキュメント.txt'); if (!name) return;
-            const formData = new FormData(); formData.append('path', currentPath); formData.append('name', name);
-            const result = await apiCall('create_file', formData);
-            if (result && result.success) loadDirectory(currentPath);
-        };
-        const deleteItems = async () => {
-            if (selectedItems.size === 0 || !confirm(`${selectedItems.size}個の項目を完全に削除しますか？`)) return;
-            const itemsToDelete = Array.from(selectedItems.values());
-            const formData = new FormData(); formData.append('items', JSON.stringify(itemsToDelete.map(item => ({path: item.path, name: item.name}))));
-            const result = await apiCall('delete', formData);
-            if (result && result.success) { selectedItems.clear(); isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath); }
-        };
-        const cutItems = () => {
-            if (selectedItems.size > 0) {
-                clipboard.type = 'cut';
-                clipboard.items = Array.from(selectedItems.values());
-                updateSelection();
-            }
-        };
-        const pasteItems = async () => {
-            if (clipboard.items.length === 0) return;
-            const formData = new FormData();
-            formData.append('items', JSON.stringify(clipboard.items));
-            formData.append('destination', currentPath);
-
-            let result;
-            if (clipboard.type === 'cut') {
-                result = await apiCall('move', formData);
-            }
-
-            if (result && result.success) {
-                clipboard = { type: null, items: [] };
-                loadDirectory(currentPath);
-            } else {
-                updateSelection();
-            }
-        };
-        const downloadFile = (filePath) => { window.location.href = `?action=download&file=${encodeURIComponent(filePath)}`; };
-        const searchFiles = async (term) => {
-            const formData = new FormData(); formData.append('query', term);
-            const data = await apiCall('search', formData);
-            if (data && data.success) { isSearchMode = true; renderItems(data.files, true); }
-        };
-        const loadFavorites = async () => {
-            const data = await apiCall('get_favorites', new FormData());
-            if (data && data.success) { 
-                favorites = data.favorites || [];
-                renderFavorites(); 
-            }
-        };
-        const saveFavorites = async () => {
-            const formData = new FormData(); 
-            formData.append('favorites', JSON.stringify(favorites));
-            await apiCall('save_favorites', formData);
-        };
-        const renderFavorites = () => {
-            favoritesListEl.innerHTML = '';
-            getEl('favorites-section').style.display = favorites.length === 0 ? 'none' : 'block';
-            if (favorites.length > 0) {
-                favorites.forEach(fav => {
-                    const favEl = document.createElement('div');
-                    favEl.className = 'nav-item nested favorite'; favEl.dataset.path = fav.path;
-                    favEl.innerHTML = `<span class="icon">${ICONS.folder}</span> <span>${fav.name}</span>`;
-                    favEl.addEventListener('click', () => navigateTo(fav.path));
-                    favEl.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); showFavoriteContextMenu(e, fav.path); });
-                    favoritesListEl.appendChild(favEl);
+            const updateAddressBar = (path) => {
+                addressBar.innerHTML = '';
+                const homeIconSvg = '<svg fill="currentColor" viewBox="0 0 16 16" style="width:16px; height:16px; margin-right:4px;"><path d="M8 1.75a.75.75 0 0 1 .53.22l5.25 5.25a.75.75 0 0 1-1.06 1.06L12 7.78V14a.75.75 0 0 1-1.5 0V9h-1v5a.75.75 0 0 1-1.5 0V7.78L4.28 8.53a.75.75 0 0 1-1.06-1.06l5.25-5.25A.75.75 0 0 1 8 1.75z"/></svg>';
+                const homePart = document.createElement('span');
+                homePart.className = 'address-bar-part';
+                homePart.innerHTML = homeIconSvg;
+                homePart.onclick = () => navigateTo('/');
+                addressBar.appendChild(homePart);
+                const parts = path.split('/').filter(p => p);
+                let currentBuildPath = '';
+                parts.forEach(part => {
+                    addressBar.insertAdjacentHTML('beforeend', '<span class="address-bar-separator">&gt;</span>');
+                    currentBuildPath += `/${part}`;
+                    const partEl = document.createElement('span');
+                    partEl.className = 'address-bar-part';
+                    partEl.textContent = part;
+                    partEl.dataset.path = currentBuildPath;
+                    partEl.onclick = () => navigateTo(partEl.dataset.path);
+                    addressBar.appendChild(partEl);
                 });
-            }
-        };
-        const showFavoriteContextMenu = (e, path) => {
-            hideContextMenu();
-            contextMenu = document.createElement('div');
-            contextMenu.className = 'context-menu';
-            document.body.appendChild(contextMenu);
-            contextMenu.innerHTML = `<div class="context-menu-item" data-action="remove_favorite"><span class="label">お気に入りから削除</span></div>`;
-            positionMenu(contextMenu, e.clientX, e.clientY);
-            contextMenu.addEventListener('click', (ev) => {
-                ev.stopPropagation();
-                const item = ev.target.closest('.context-menu-item');
-                if (item && item.dataset.action === 'remove_favorite') {
-                    removeFavorite(path);
+            };
+            const updateUsage = async () => {
+                const data = await apiCall('get_usage', new FormData());
+                if(data && data.success) {
+                    const percentage = data.total > 0 ? (data.used / data.total) * 100 : 0;
+                    usageFill.style.width = `${Math.min(percentage, 100)}%`;
+                    usageText.textContent = `${data.used_formatted} / ${data.total_formatted}`;
                 }
+            };
+            const updateSelection = () => {
+                document.querySelectorAll('.file-item.selected, .grid-item.selected').forEach(el => el.classList.remove('selected'));
+                document.querySelectorAll('.file-item.cut, .grid-item.cut').forEach(el => el.classList.remove('cut'));
+                selectedItems.forEach((_, key) => {
+                    document.querySelectorAll(`[data-path="${CSS.escape(key)}"]`).forEach(el => el.classList.add('selected'));
+                });
+                if (clipboard.type === 'cut') {
+                    clipboard.items.forEach(item => {
+                        document.querySelectorAll(`[data-path="${CSS.escape(item.path)}"]`).forEach(el => el.classList.add('cut'));
+                    });
+                }
+                const hasSelection = selectedItems.size > 0;
+                const hasSystemFile = Array.from(selectedItems.values()).some(file => file.is_system);
+                getEl('delete-btn').disabled = !hasSelection || hasSystemFile;
+                getEl('rename-btn').disabled = selectedItems.size !== 1 || hasSystemFile;
+                getEl('copy-btn').disabled = !hasSelection;
+                getEl('cut-btn').disabled = !hasSelection || hasSystemFile;
+                getEl('paste-btn').disabled = clipboard.items.length === 0;
+                getEl('share-btn').disabled = selectedItems.size !== 1;
+                const totalItems = document.querySelectorAll('.file-item:not(.search-result), .grid-item:not(.search-result)').length;
+                itemCountEl.textContent = selectedItems.size > 0 ? `${selectedItems.size} 個の項目を選択` : `${totalItems} 項目`;
+            };
+            const navigateTo = (path, fromHistory = false) => {
+                if (currentPath === path && !fromHistory) return;
+                if (!fromHistory) {
+                    if(currentPath !== path) history.past.push(currentPath);
+                    history.future = [];
+                }
+                currentPath = path;
+                selectedItems.clear();
+                searchBox.value = '';
+                isSearchMode = false;
+                loadDirectory(path);
+                updateNavButtons();
+            };
+            const updateNavButtons = () => {
+                navBackBtn.disabled = history.past.length === 0;
+                navForwardBtn.disabled = history.future.length === 0;
+                navUpBtn.disabled = currentPath === '/';
+            };
+            const renderItems = (files, isSearch = false) => {
+                fileListBody.innerHTML = '';
+                fileGridView.innerHTML = '';
+                if (files.length === 0) {
+                     if (!isSearch) {
+                        fileListBody.innerHTML = '<tr class="empty-message"><td colspan="5">このフォルダーは空です。</td></tr>';
+                     }
+                } else {
+                    files.forEach(file => {
+                        const filePath = file.path || (currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`);
+                        const row = document.createElement('tr');
+                        row.className = `file-item ${isSearch ? 'search-result' : ''}`;
+                        row.dataset.path = filePath;
+                        row.dataset.name = file.name;
+                        row.dataset.isDir = file.is_dir;
+                        row.dataset.isSystem = file.is_system;
+                        let nameCellHTML = `<div class="item-name-container"><span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="item-name">${file.name}</span></div>`;
+                        if (isSearch) { nameCellHTML += `<div class="path">${filePath}</div>`; }
+                        const checkboxHTML = `<td class="col-check"><input type="checkbox" class="item-checkbox" data-path="${filePath}"></td>`;
+                        if (file.is_system) {
+                            row.innerHTML = `${checkboxHTML}<td class="col-name">${nameCellHTML}</td><td class="col-modified"></td><td class="col-type"><span style="color: var(--text-secondary-color);">SYSTEM FILE</span></td><td class="col-size"></td>`;
+                        } else {
+                            row.innerHTML = `${checkboxHTML}<td class="col-name">${nameCellHTML}</td><td class="col-modified">${file.modified}</td><td class="col-type">${file.type}</td><td class="col-size">${file.size}</td>`;
+                        }
+                        fileListBody.appendChild(row);
+                        const gridItem = document.createElement('div');
+                        gridItem.className = 'grid-item';
+                        gridItem.dataset.path = filePath;
+                        gridItem.dataset.name = file.name;
+                        gridItem.dataset.isDir = file.is_dir;
+                        gridItem.dataset.isSystem = file.is_system;
+                        gridItem.innerHTML = `<span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="name">${file.name}</span>`;
+                        fileGridView.appendChild(gridItem);
+                        [row, gridItem].forEach(el => {
+                            el.addEventListener('click', e => handleItemClick(e, file, el));
+                            el.addEventListener('dblclick', () => handleItemDblClick(file, filePath));
+                            el.addEventListener('contextmenu', e => handleItemContextMenu(e, file, el));
+                        });
+                    });
+                }
+                updateSelection();
+            };
+            const loadDirectory = async (path) => {
+                const formData = new FormData();
+                formData.append('path', path);
+                const data = await apiCall('list', formData);
+                if (!data || !data.success) { if (path !== '/') navigateTo('/'); return; }
+                isSearchMode = false;
+                addressBar.style.display = 'flex';
+                addressInput.style.display = 'none';
+                searchBox.style.display = 'block';
+                updateAddressBar(data.path);
+                renderItems(data.files, false);
+                updateUsage();
+                navPane.querySelectorAll('.nav-item').forEach(item => {
+                    if(item.dataset.path === path) item.classList.add('active');
+                    else item.classList.remove('active');
+                });
+            };
+            const handleItemClick = (e, file, element) => {
+                e.stopPropagation();
                 hideContextMenu();
-            });
-        };
-        const addFavorite = (path, name) => {
-            if (!favorites.some(fav => fav.path === path)) { 
-                favorites.push({ path, name }); 
+                const itemPath = element.dataset.path;
+                const fileData = { path: itemPath, name: file.name, is_dir: file.is_dir, is_system: file.is_system };
+                if (e.target.type === 'checkbox') {
+                     e.target.checked ? selectedItems.set(itemPath, fileData) : selectedItems.delete(itemPath);
+                } else if (e.ctrlKey) {
+                    selectedItems.has(itemPath) ? selectedItems.delete(itemPath) : selectedItems.set(itemPath, fileData);
+                } else if (e.shiftKey && selectedItems.size > 0) {
+                    selectedItems.clear();
+                    selectedItems.set(itemPath, fileData);
+                } else {
+                    selectedItems.clear();
+                    selectedItems.set(itemPath, fileData);
+                }
+                updateSelection();
+                showPreview();
+            };
+            const handleItemDblClick = (file, path) => { file.is_dir ? navigateTo(path) : downloadFile(path); };
+            const handleItemContextMenu = (e, file, row) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const itemPath = row.dataset.path;
+                const fileData = { path: itemPath, name: file.name, is_dir: file.is_dir, is_system: file.is_system };
+                if (!selectedItems.has(itemPath)) {
+                    selectedItems.clear();
+                    selectedItems.set(itemPath, fileData);
+                    updateSelection();
+                }
+                showContextMenu(e, fileData, row);
+            };
+            const positionMenu = (menu, x, y, parentElement = null) => {
+                const menuRect = menu.getBoundingClientRect();
+                let newX = x, newY = y;
+                if (parentElement) {
+                    const parentRect = parentElement.getBoundingClientRect();
+                    newX = parentRect.right;
+                    if (newX + menuRect.width > window.innerWidth) newX = parentRect.left - menuRect.width;
+                    newY = parentRect.top;
+                } else {
+                     if (newX + menuRect.width > window.innerWidth) newX = window.innerWidth - menuRect.width - 5;
+                }
+                if (newY + menuRect.height > window.innerHeight) newY = window.innerHeight - menuRect.height - 5;
+                if (newX < 0) newX = 5; if (newY < 0) newY = 5;
+                menu.style.left = `${newX}px`; menu.style.top = `${newY}px`;
+            };
+            const showContextMenu = (e, fileInfo, element) => {
+                hideContextMenu();
+                contextMenu = document.createElement('div');
+                contextMenu.className = 'context-menu';
+                document.body.appendChild(contextMenu);
+                const canPaste = clipboard.items.length > 0;
+                let menuItemsHTML = '';
+                if (fileInfo) {
+                    const isSystem = fileInfo.is_system;
+                    const openActionText = fileInfo.is_dir ? '開く' : 'ダウンロード';
+                    menuItemsHTML += `<div class="context-menu-item" data-action="open"><span class="label">${openActionText}</span></div>`;
+                    if (!fileInfo.is_dir) menuItemsHTML += `<div class="context-menu-item has-submenu"><span class="label">アプリで開く</span><div class="submenu"><div class="context-menu-item" data-action="open-with-notepad"><span class="label">Notepad</span></div></div></div>`;
+                    if (!isSystem) {
+                        if (fileInfo.is_dir) {
+                            const isFavorite = favorites.some(fav => fav.path === element.dataset.path);
+                            menuItemsHTML += `<div class="context-menu-item" data-action="${isFavorite ? 'remove_favorite' : 'add_favorite'}"><span class="label">${isFavorite ? 'お気に入りから削除' : 'お気に入りに追加'}</span></div>`;
+                        }
+                        menuItemsHTML += `<div class="context-menu-separator"></div>`;
+                        menuItemsHTML += `<div class="context-menu-item" data-action="cut"><span class="label">切り取り</span></div>`;
+                        menuItemsHTML += `<div class="context-menu-separator"></div>`;
+                        menuItemsHTML += `<div class="context-menu-item" data-action="delete"><span class="label">削除</span></div>`;
+                        menuItemsHTML += `<div class="context-menu-item" data-action="rename"><span class="label">名前の変更</span></div>`;
+                    }
+                } else {
+                    menuItemsHTML += `<div class="context-menu-item ${canPaste ? '' : 'disabled'}" data-action="paste"><span class="label">貼り付け</span></div>`;
+                    menuItemsHTML += `<div class="context-menu-separator"></div>`;
+                    menuItemsHTML += `<div class="context-menu-item has-submenu"><span class="label">新規作成</span><div class="submenu"><div class="context-menu-item" data-action="create_folder"><span class="label">フォルダー</span></div><div class="context-menu-item" data-action="create_file"><span class="label">テキスト ドキュメント</span></div></div></div>`;
+                    menuItemsHTML += `<div class="context-menu-separator"></div>`;
+                    menuItemsHTML += `<div class="context-menu-item" data-action="copy_path"><span class="label">パスのコピー</span></div>`;
+                }
+                contextMenu.innerHTML = menuItemsHTML;
+                positionMenu(contextMenu, e.clientX, e.clientY);
+            };
+            const hideContextMenu = () => { if (contextMenu) contextMenu.remove(); contextMenu = null; };
+            const handleContextMenuAction = (action, fileInfo, element) => {
+                hideContextMenu();
+                const itemPath = element ? element.dataset.path : null;
+                switch (action) {
+                    case 'open': fileInfo.is_dir ? navigateTo(itemPath) : downloadFile(itemPath); break;
+                    case 'open-with-notepad': window.parent.postMessage({ type: 'openWithApp', app: 'notepad', filePath: itemPath }, '*'); break;
+                    case 'rename': initiateRename(element); break;
+                    case 'delete': deleteItems(); break;
+                    case 'cut': cutItems(); break;
+                    case 'paste': pasteItems(); break;
+                    case 'add_favorite': addFavorite(itemPath, fileInfo.name); break;
+                    case 'remove_favorite': removeFavorite(itemPath); break;
+                    case 'copy_path': copyToClipboard(currentPath); break;
+                    case 'create_file': createNewFile(); break;
+                    case 'create_folder': createFolder(); break;
+                }
+            };
+            const initiateRename = (rowElement) => {
+                const nameContainer = rowElement.querySelector('.item-name-container');
+                const nameSpan = nameContainer.querySelector('.item-name');
+                if (!nameSpan || nameContainer.querySelector('input')) return;
+                const oldName = nameSpan.textContent;
+                nameSpan.style.display = 'none';
+                const input = document.createElement('input'); input.type = 'text'; input.value = oldName;
+                const finishRename = async () => {
+                    input.removeEventListener('blur', finishRename);
+                    input.removeEventListener('keydown', keydownHandler);
+                    const newName = input.value.trim();
+                    nameSpan.style.display = ''; input.remove();
+                    if (newName && newName !== oldName) {
+                        const formData = new FormData();
+                        formData.append('item_path', rowElement.dataset.path);
+                        formData.append('new_name', newName);
+                        const result = await apiCall('rename', formData);
+                        if (result && result.success) isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath);
+                    }
+                };
+                const keydownHandler = e => { if (e.key === 'Enter') finishRename(); else if (e.key === 'Escape') { input.removeEventListener('blur', finishRename); nameSpan.style.display = ''; input.remove(); } };
+                input.addEventListener('blur', finishRename);
+                input.addEventListener('keydown', keydownHandler);
+                nameContainer.appendChild(input);
+                input.focus();
+                input.select();
+            };
+            const uploadFiles = async (files, isFolder = false) => {
+                const formData = new FormData();
+                formData.append('path', currentPath);
+                const relativePaths = [];
+                for (const file of files) { formData.append('files[]', file, file.name); if (isFolder && file.webkitRelativePath) relativePaths.push(file.webkitRelativePath); }
+                if (isFolder) formData.append('relative_paths', JSON.stringify(relativePaths));
+                const result = await apiCall('upload', formData);
+                if (result && result.success) loadDirectory(currentPath);
+            };
+            const createFolder = async () => {
+                const name = prompt('新しいフォルダ名:', '新しいフォルダー'); if (!name) return;
+                const formData = new FormData();
+                formData.append('path', currentPath);
+                formData.append('name', name);
+                const result = await apiCall('create_folder', formData);
+                if (result && result.success) loadDirectory(currentPath);
+            };
+            const createNewFile = async () => {
+                const name = prompt('新しいファイル名:', '新規テキストドキュメント.txt'); if (!name) return;
+                const formData = new FormData();
+                formData.append('path', currentPath);
+                formData.append('name', name);
+                const result = await apiCall('create_file', formData);
+                if (result && result.success) loadDirectory(currentPath);
+            };
+            const deleteItems = async () => {
+                if (selectedItems.size === 0 || !confirm(`${selectedItems.size}個の項目を完全に削除しますか？`)) return;
+                const itemsToDelete = Array.from(selectedItems.values());
+                const formData = new FormData();
+                formData.append('items', JSON.stringify(itemsToDelete.map(item => ({path: item.path, name: item.name}))));
+                const result = await apiCall('delete', formData);
+                if (result && result.success) { selectedItems.clear(); isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath); }
+            };
+            const cutItems = () => {
+                if (selectedItems.size > 0) {
+                    clipboard.type = 'cut';
+                    clipboard.items = Array.from(selectedItems.values());
+                    updateSelection();
+                }
+            };
+            const pasteItems = async () => {
+                if (clipboard.items.length === 0) return;
+                const formData = new FormData();
+                formData.append('items', JSON.stringify(clipboard.items));
+                formData.append('destination', currentPath);
+                let result;
+                if (clipboard.type === 'cut') {
+                    result = await apiCall('move', formData);
+                }
+                if (result && result.success) {
+                    clipboard = { type: null, items: [] };
+                    loadDirectory(currentPath);
+                } else {
+                    updateSelection();
+                }
+            };
+            const downloadFile = (filePath) => { window.location.href = `?action=download&file=${encodeURIComponent(filePath)}`; };
+            const searchFiles = async (term) => {
+                const formData = new FormData();
+                formData.append('query', term);
+                const data = await apiCall('search', formData);
+                if (data && data.success) { isSearchMode = true; renderItems(data.files, true); }
+            };
+            const loadFavorites = async () => {
+                const data = await apiCall('get_favorites', new FormData());
+                if (data && data.success) { 
+                    favorites = data.favorites || [];
+                    renderFavorites(); 
+                }
+            };
+            const saveFavorites = async () => {
+                const formData = new FormData(); 
+                formData.append('favorites', JSON.stringify(favorites));
+                await apiCall('save_favorites', formData);
+            };
+            const renderFavorites = () => {
+                favoritesListEl.innerHTML = '';
+                getEl('favorites-section').style.display = favorites.length === 0 ? 'none' : 'block';
+                if (favorites.length > 0) {
+                    favorites.forEach(fav => {
+                        const favEl = document.createElement('div');
+                        favEl.className = 'nav-item nested favorite'; favEl.dataset.path = fav.path;
+                        favEl.innerHTML = `<span class="icon">${ICONS.folder}</span> <span>${fav.name}</span>`;
+                        favEl.addEventListener('click', () => navigateTo(fav.path));
+                        favEl.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); showFavoriteContextMenu(e, fav.path); });
+                        favoritesListEl.appendChild(favEl);
+                    });
+                }
+            };
+            const showFavoriteContextMenu = (e, path) => {
+                hideContextMenu();
+                contextMenu = document.createElement('div');
+                contextMenu.className = 'context-menu';
+                document.body.appendChild(contextMenu);
+                contextMenu.innerHTML = `<div class="context-menu-item" data-action="remove_favorite"><span class="label">お気に入りから削除</span></div>`;
+                positionMenu(contextMenu, e.clientX, e.clientY);
+            };
+            const addFavorite = (path, name) => {
+                if (!favorites.some(fav => fav.path === path)) { 
+                    favorites.push({ path, name }); 
+                    saveFavorites(); 
+                    renderFavorites(); 
+                }
+            };
+            const removeFavorite = (path) => { 
+                favorites = favorites.filter(fav => fav.path !== path); 
                 saveFavorites(); 
                 renderFavorites(); 
-            }
-        };
-        const removeFavorite = (path) => { 
-            favorites = favorites.filter(fav => fav.path !== path); 
-            saveFavorites(); 
-            renderFavorites(); 
-        };
-        const showViewContextMenu = (e) => {
-            hideContextMenu();
-            showContextMenu(e, null, null);
-        };
-        const copyToClipboard = (text) => {
-            navigator.clipboard.writeText(text).catch(err => console.error('クリップボードへのコピーに失敗:', err));
-        };
-        const showPreview = () => {
-            if (!previewPane.classList.contains('active') || selectedItems.size !== 1) {
-                previewContent.innerHTML = ''; previewPlaceholder.textContent = 'プレビューするファイルを選択してください'; previewPlaceholder.style.display = 'block';
-                return;
-            }
-            const [filePath] = selectedItems.keys(); const ext = filePath.split('.').pop().toLowerCase();
-            const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp'];
-            const videoExts = ['mp4', 'webm', 'ogg'];
-            previewPlaceholder.style.display = 'none'; previewContent.innerHTML = '';
-            if (imageExts.includes(ext)) {
-                const img = document.createElement('img'); img.src = `?action=download&file=${encodeURIComponent(filePath)}`;
-                previewContent.appendChild(img);
-            } else if (videoExts.includes(ext)) {
-                 const video = document.createElement('video'); video.src = `?action=download&file=${encodeURIComponent(filePath)}`; video.controls = true;
-                 previewContent.appendChild(video);
-            } else {
-                 previewPlaceholder.textContent = 'このファイル形式のプレビューはありません。'; previewPlaceholder.style.display = 'block';
-            }
-        };
-        const startSelection = (e) => {
-            if (e.target.closest('.file-item, .grid-item')) return;
-            isSelecting = true;
-            contentAreaRect = contentArea.getBoundingClientRect();
-            startX = e.clientX - contentAreaRect.left;
-            startY = e.clientY - contentAreaRect.top;
-            selectionRectangle.style.left = `${startX}px`;
-            selectionRectangle.style.top = `${startY}px`;
-            selectionRectangle.style.width = '0px';
-            selectionRectangle.style.height = '0px';
-            selectionRectangle.style.display = 'block';
-            document.addEventListener('mousemove', doSelection);
-            document.addEventListener('mouseup', endSelection);
-        };
-        const doSelection = (e) => {
-            if (!isSelecting) return;
-            e.preventDefault();
-            const currentX = e.clientX - contentAreaRect.left;
-            const currentY = e.clientY - contentAreaRect.top;
-            const left = Math.min(startX, currentX);
-            const top = Math.min(startY, currentY);
-            const width = Math.abs(startX - currentX);
-            const height = Math.abs(startY - currentY);
-            selectionRectangle.style.left = `${left}px`;
-            selectionRectangle.style.top = `${top}px`;
-            selectionRectangle.style.width = `${width}px`;
-            selectionRectangle.style.height = `${height}px`;
+            };
+            const showViewContextMenu = (e) => {
+                hideContextMenu();
+                showContextMenu(e, null, null);
+            };
+            const copyToClipboard = (text) => {
+                navigator.clipboard.writeText(text).catch(err => console.error('クリップボードへのコピーに失敗:', err));
+            };
+            const showPreview = () => {
+                if (!previewPane.classList.contains('active') || selectedItems.size !== 1) {
+                    previewContent.innerHTML = ''; previewPlaceholder.textContent = 'プレビューするファイルを選択してください'; previewPlaceholder.style.display = 'block';
+                    return;
+                }
+                const [filePath] = selectedItems.keys(); const ext = filePath.split('.').pop().toLowerCase();
+                const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp'];
+                const videoExts = ['mp4', 'webm', 'ogg'];
+                previewPlaceholder.style.display = 'none'; previewContent.innerHTML = '';
+                if (imageExts.includes(ext)) {
+                    const img = document.createElement('img'); img.src = `?action=download&file=${encodeURIComponent(filePath)}`;
+                    previewContent.appendChild(img);
+                } else if (videoExts.includes(ext)) {
+                     const video = document.createElement('video'); video.src = `?action=download&file=${encodeURIComponent(filePath)}`; video.controls = true;
+                     previewContent.appendChild(video);
+                } else {
+                     previewPlaceholder.textContent = 'このファイル形式のプレビューはありません。'; previewPlaceholder.style.display = 'block';
+                }
+            };
+            const startSelection = (e) => {
+                if (e.target.closest('.file-item, .grid-item, .modal')) return;
+                isSelecting = true;
+                contentAreaRect = contentArea.getBoundingClientRect();
+                startX = e.clientX - contentAreaRect.left;
+                startY = e.clientY - contentAreaRect.top;
+                selectionRectangle.style.left = `${startX}px`;
+                selectionRectangle.style.top = `${startY}px`;
+                selectionRectangle.style.width = '0px';
+                selectionRectangle.style.height = '0px';
+                selectionRectangle.style.display = 'block';
+                document.addEventListener('mousemove', doSelection);
+                document.addEventListener('mouseup', endSelection);
+            };
+            const doSelection = (e) => {
+                if (!isSelecting) return;
+                e.preventDefault();
+                const currentX = e.clientX - contentAreaRect.left;
+                const currentY = e.clientY - contentAreaRect.top;
+                const left = Math.min(startX, currentX);
+                const top = Math.min(startY, currentY);
+                const width = Math.abs(startX - currentX);
+                const height = Math.abs(startY - currentY);
+                selectionRectangle.style.left = `${left}px`;
+                selectionRectangle.style.top = `${top}px`;
+                selectionRectangle.style.width = `${width}px`;
+                selectionRectangle.style.height = `${height}px`;
 
-            const rect = selectionRectangle.getBoundingClientRect();
-            const items = document.querySelectorAll('.file-item, .grid-item');
-            if (!e.ctrlKey) selectedItems.clear();
-            items.forEach(itemEl => {
-                const itemRect = itemEl.getBoundingClientRect();
-                const path = itemEl.dataset.path;
-                const fileData = { path, name: itemEl.dataset.name, is_dir: itemEl.dataset.isDir === 'true', is_system: itemEl.dataset.isSystem === 'true' };
-                if (rect.left < itemRect.right && rect.right > itemRect.left && rect.top < itemRect.bottom && rect.bottom > itemRect.top) {
-                    if (!selectedItems.has(path)) selectedItems.set(path, fileData);
+                const rect = selectionRectangle.getBoundingClientRect();
+                const items = document.querySelectorAll('.file-item, .grid-item');
+                if (!e.ctrlKey) selectedItems.clear();
+                items.forEach(itemEl => {
+                    const itemRect = itemEl.getBoundingClientRect();
+                    const path = itemEl.dataset.path;
+                    const fileData = { path, name: itemEl.dataset.name, is_dir: itemEl.dataset.isDir === 'true', is_system: itemEl.dataset.isSystem === 'true' };
+                    if (rect.left < itemRect.right && rect.right > itemRect.left && rect.top < itemRect.bottom && rect.bottom > itemRect.top) {
+                        if (!selectedItems.has(path)) selectedItems.set(path, fileData);
+                    }
+                });
+                updateSelection();
+            };
+            const endSelection = () => {
+                isSelecting = false;
+                selectionRectangle.style.display = 'none';
+                document.removeEventListener('mousemove', doSelection);
+                document.removeEventListener('mouseup', endSelection);
+            };
+            
+            const resetShareModal = () => {
+                shareLinkInput.value = '';
+                sharePasswordField.value = '';
+                sharePasswordField.placeholder = 'パスワード (任意)';
+                shareExpiresField.value = '';
+                getEl('share-type-public').checked = true;
+                privateShareOptions.style.display = 'none';
+                selectedRecipients.clear();
+                renderSelectedRecipients();
+                stopShareBtn.style.display = 'none';
+                currentShareId = null;
+            };
+
+            shareBtn.addEventListener('click', async () => {
+                if(selectedItems.size !== 1) return;
+                resetShareModal();
+                const itemPath = selectedItems.keys().next().value;
+                const itemName = selectedItems.get(itemPath).name;
+                getEl('share-modal-title').textContent = `「${itemName}」を共有`;
+                
+                const formData = new FormData();
+                formData.append('item_path', itemPath);
+                const data = await apiCall('get_shares_for_item', formData);
+
+                if(data && data.success && data.share) {
+                    const share = data.share;
+                    currentShareId = share.share_id;
+                    shareLinkInput.value = share.url;
+                    sharePasswordField.placeholder = "パスワードを変更しない場合は空のまま";
+                    shareExpiresField.value = share.expires_at ? share.expires_at.replace(' ', 'T') : '';
+                    stopShareBtn.style.display = 'inline-block';
+                }
+                shareModal.style.display = "flex";
+            });
+
+            createShareBtn.addEventListener('click', async () => {
+                const itemPath = selectedItems.keys().next().value;
+                if (!itemPath) return;
+                const formData = new FormData();
+                formData.append('item_path', itemPath);
+                formData.append('share_type', document.querySelector('input[name="share-type"]:checked').value);
+                formData.append('password', sharePasswordField.value);
+                formData.append('expires_at', shareExpiresField.value);
+                if (document.querySelector('input[name="share-type"]:checked').value === 'private') {
+                    formData.append('recipients', JSON.stringify(Array.from(selectedRecipients.keys())));
+                }
+                const result = await apiCall('create_share', formData);
+                if (result && result.success) {
+                    shareLinkInput.value = result.url;
+                    currentShareId = result.share_id;
+                    stopShareBtn.style.display = 'inline-block';
+                    alert(result.message);
                 }
             });
-            updateSelection();
-        };
-        const endSelection = () => {
-            isSelecting = false;
-            selectionRectangle.style.display = 'none';
-            document.removeEventListener('mousemove', doSelection);
-            document.removeEventListener('mouseup', endSelection);
-        };
-        
-        addEventListenerIfPresent('cut-btn', 'click', cutItems);
-        addEventListenerIfPresent('paste-btn', 'click', pasteItems);
-        addEventListenerIfPresent('upload-file-btn', 'click', () => fileInput.click());
-        addEventListenerIfPresent('upload-folder-btn', 'click', () => folderInput.click());
-        addEventListenerIfPresent('preview-pane-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); previewPane.classList.toggle('active'); showPreview(); });
-        addEventListenerIfPresent('item-checkboxes-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); explorerContainer.classList.toggle('show-checkboxes'); });
-        addEventListenerIfPresent('new-folder-btn', 'click', createFolder);
-        addEventListenerIfPresent('delete-btn', 'click', deleteItems);
-        addEventListenerIfPresent('rename-btn', 'click', () => { if(selectedItems.size !== 1) return; const path = selectedItems.keys().next().value; const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`); if (el) initiateRename(el); });
 
-        document.querySelectorAll('.layout-btn').forEach(btn => btn.addEventListener('click', (e) => {
-            const activeBtn = document.querySelector('.layout-btn.active');
-            if(activeBtn) activeBtn.classList.remove('active');
-            const target = e.currentTarget; target.classList.add('active'); currentLayout = target.id === 'large-icons-btn' ? 'grid' : 'details';
-            fileTableView.style.display = currentLayout === 'details' ? 'block' : 'none';
-            fileGridView.style.display = currentLayout === 'grid' ? 'flex' : 'none';
-        }));
-        document.querySelectorAll('.header-tabs .tab-item').forEach(tab => tab.addEventListener('click', () => {
-            const activeTab = document.querySelector('.header-tabs .tab-item.active');
-            if(activeTab) activeTab.classList.remove('active');
-            tab.classList.add('active');
-            const targetToolbarId = tab.dataset.toolbar;
-            document.querySelectorAll('.toolbar').forEach(toolbar => { toolbar.id === targetToolbarId ? toolbar.classList.add('active') : toolbar.classList.remove('active'); });
-        }));
-        navBackBtn.addEventListener('click', () => { if (history.past.length > 0) { history.future.unshift(currentPath); navigateTo(history.past.pop(), true); } });
-        navForwardBtn.addEventListener('click', () => { if (history.future.length > 0) { history.past.push(currentPath); navigateTo(history.future.shift(), true); } });
-        navUpBtn.addEventListener('click', () => { if (currentPath !== '/') navigateTo(currentPath.substring(0, currentPath.lastIndexOf('/')) || '/'); });
-        fileInput.addEventListener('change', (e) => uploadFiles(e.target.files, false));
-        folderInput.addEventListener('change', (e) => uploadFiles(e.target.files, true));
-        searchBox.addEventListener('input', () => { const term = searchBox.value.trim(); if (term === '') { if (isSearchMode) navigateTo(currentPath); } else { searchFiles(term); } });
-        navPane.querySelectorAll('.nav-item').forEach(item => { if(item.id !== 'nav-home' && !item.parentElement.id.includes('favorites')) return; item.addEventListener('click', () => navigateTo(item.dataset.path)); });
-        getEl('nav-home').addEventListener('click', () => navigateTo('/'));
-        const body = document.body;
-        body.addEventListener('dragenter', (e) => { e.preventDefault(); dragDropOverlay.classList.add('visible'); });
-        body.addEventListener('dragover', (e) => { e.preventDefault(); });
-        body.addEventListener('dragleave', (e) => { if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) dragDropOverlay.classList.remove('visible'); });
-        body.addEventListener('drop', (e) => { e.preventDefault(); dragDropOverlay.classList.remove('visible'); uploadFiles(e.dataTransfer.files, false); });
-        contentArea.addEventListener('mousedown', startSelection);
-        contentArea.addEventListener('contextmenu', (e) => { if (e.target.closest('.file-item') || e.target.closest('.grid-item')) return; e.preventDefault(); showViewContextMenu(e); });
-        document.addEventListener('click', (e) => {
-            hideContextMenu();
-            const clickedInside = e.target.closest('.content-area, .toolbar, .nav-pane, .address-bar-container');
-            if (!clickedInside) {
-                selectedItems.clear();
-                updateSelection();
+            stopShareBtn.addEventListener('click', async () => {
+                if (!currentShareId || !confirm('この共有を停止しますか？リンクは無効になります。')) return;
+                const formData = new FormData();
+                formData.append('share_id', currentShareId);
+                const result = await apiCall('delete_share', formData);
+                if (result && result.success) {
+                    alert(result.message);
+                    resetShareModal();
+                    shareModal.style.display = 'none';
+                }
+            });
+            
+            const openManageSharesModal = async () => {
+                const manageSharesList = getEl('manage-shares-list');
+                manageSharesList.innerHTML = '<tr><td colspan="5">読み込み中...</td></tr>';
+                manageSharesModal.style.display = 'flex';
+                const data = await apiCall('get_all_shares', new FormData());
+                manageSharesList.innerHTML = '';
+                if(data && data.success && data.shares.length > 0) {
+                    data.shares.forEach(share => {
+                        const row = manageSharesList.insertRow();
+                        row.dataset.shareId = share.share_id;
+                        row.innerHTML = `
+                            <td>${share.source_path}</td>
+                            <td>${share.share_type === 'public' ? '全員' : 'プライベート'}</td>
+                            <td>${share.password_hash ? 'あり' : 'なし'}</td>
+                            <td>${share.expires_at || '無期限'}</td>
+                            <td><button class="stop-share-list-btn" data-share-id="${share.share_id}">停止</button></td>
+                        `;
+                    });
+                } else {
+                    manageSharesList.innerHTML = '<tr><td colspan="5">共有中のアイテムはありません。</td></tr>';
+                }
+            };
+            
+            getEl('manage-shares-list').addEventListener('click', async (e) => {
+                if (e.target.classList.contains('stop-share-list-btn')) {
+                    const shareIdToStop = e.target.dataset.shareId;
+                    if (!shareIdToStop || !confirm(`この共有を停止しますか？`)) return;
+                    const formData = new FormData();
+                    formData.append('share_id', shareIdToStop);
+                    const result = await apiCall('delete_share', formData);
+                    if (result && result.success) {
+                        alert(result.message);
+                        e.target.closest('tr').remove();
+                    }
+                }
+            });
+
+            manageSharesBtn.addEventListener('click', openManageSharesModal);
+            closeShareModalBtn.onclick = () => shareModal.style.display = "none";
+            closeManageSharesModalBtn.onclick = () => manageSharesModal.style.display = "none";
+            
+            window.onclick = (event) => {
+                if (event.target == shareModal) shareModal.style.display = "none";
+                if (event.target == manageSharesModal) manageSharesModal.style.display = "none";
+            };
+            
+            document.querySelectorAll('input[name="share-type"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    privateShareOptions.style.display = e.target.value === 'private' ? 'block' : 'none';
+                });
+            });
+
+            recipientsInput.addEventListener('input', async (e) => {
+                const term = e.target.value.trim();
+                userSearchResults.innerHTML = '';
+                if (term.length < 1) return;
+                const formData = new FormData();
+                formData.append('term', term);
+                const data = await apiCall('get_users_for_sharing', formData);
+                if (data && data.success) {
+                    data.users.forEach(user => {
+                        if(selectedRecipients.has(user.id)) return;
+                        const userDiv = document.createElement('div');
+                        userDiv.textContent = user.username;
+                        userDiv.onclick = () => {
+                            selectedRecipients.set(user.id, user.username);
+                            renderSelectedRecipients();
+                            recipientsInput.value = '';
+                            userSearchResults.innerHTML = '';
+                        };
+                        userSearchResults.appendChild(userDiv);
+                    });
+                }
+            });
+
+            const renderSelectedRecipients = () => {
+                selectedRecipientsList.innerHTML = '';
+                selectedRecipients.forEach((username, id) => {
+                    const recipientTag = document.createElement('span');
+                    recipientTag.textContent = username;
+                    const removeBtn = document.createElement('button');
+                    removeBtn.textContent = '×';
+                    removeBtn.onclick = () => {
+                        selectedRecipients.delete(id);
+                        renderSelectedRecipients();
+                    };
+                    recipientTag.appendChild(removeBtn);
+                    selectedRecipientsList.appendChild(recipientTag);
+                });
             }
-        });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { hideContextMenu(); } if (e.key === 'Delete' && selectedItems.size > 0 && document.activeElement.tagName !== 'INPUT') { deleteItems(); } if (e.key === 'F2' && selectedItems.size === 1) { const path = selectedItems.keys().next().value; const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`); if (el) initiateRename(el); } if (e.ctrlKey && e.key.toLowerCase() === 'x') { e.preventDefault(); cutItems(); } if (e.ctrlKey && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteItems(); } });
 
-        loadFavorites();
-        loadDirectory(currentPath);
-        updateNavButtons();
-    });
+            document.querySelectorAll('.header-tabs .tab-item').forEach(tab => tab.addEventListener('click', (e) => {
+                document.querySelector('.header-tabs .tab-item.active')?.classList.remove('active');
+                e.currentTarget.classList.add('active');
+                const targetToolbarId = e.currentTarget.dataset.toolbar;
+                document.querySelectorAll('.toolbar').forEach(toolbar => {
+                    toolbar.classList.toggle('active', toolbar.id === targetToolbarId);
+                });
+            }));
+            
+            document.addEventListener('click', (e) => {
+                if(e.target.closest('.context-menu-item')) {
+                    const item = e.target.closest('.context-menu-item');
+                    if (item && !item.classList.contains('has-submenu') && !item.classList.contains('disabled')) {
+                        const selectedRow = fileListBody.querySelector('tr.selected') || fileGridView.querySelector('.grid-item.selected');
+                        const fileInfo = selectedRow ? {
+                            name: selectedRow.dataset.name,
+                            is_dir: selectedRow.dataset.isDir === 'true',
+                            is_system: selectedRow.dataset.isSystem === 'true'
+                        } : null;
+                        handleContextMenuAction(item.dataset.action, fileInfo, selectedRow);
+                    }
+                } else if (contextMenu && !contextMenu.contains(e.target)) {
+                     hideContextMenu();
+                }
+                
+                const clickedInside = e.target.closest('.content-area, .toolbar, .nav-pane, .address-bar-container, .modal-content, .context-menu');
+                if (!clickedInside) {
+                    selectedItems.clear();
+                    updateSelection();
+                }
+            });
+
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    hideContextMenu();
+                    shareModal.style.display = 'none';
+                    manageSharesModal.style.display = 'none';
+                }
+                if (document.activeElement.tagName === 'INPUT') return;
+                if (e.key === 'Delete' && selectedItems.size > 0) deleteItems();
+                if (e.key === 'F2' && selectedItems.size === 1) {
+                    const path = selectedItems.keys().next().value;
+                    const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`);
+                    if (el) initiateRename(el);
+                }
+                if (e.ctrlKey && e.key.toLowerCase() === 'x') { e.preventDefault(); cutItems(); }
+                if (e.ctrlKey && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteItems(); }
+            });
+            
+            addEventListenerIfPresent('upload-file-btn', 'click', () => fileInput.click());
+            addEventListenerIfPresent('upload-folder-btn', 'click', () => folderInput.click());
+            addEventListenerIfPresent('preview-pane-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); previewPane.classList.toggle('active'); showPreview(); });
+            addEventListenerIfPresent('item-checkboxes-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); explorerContainer.classList.toggle('show-checkboxes'); });
+            addEventListenerIfPresent('new-folder-btn', 'click', createFolder);
+            addEventListenerIfPresent('delete-btn', 'click', deleteItems);
+            addEventListenerIfPresent('rename-btn', 'click', () => { if(selectedItems.size !== 1) return; const path = selectedItems.keys().next().value; const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`); if (el) initiateRename(el); });
+            addEventListenerIfPresent('cut-btn', 'click', cutItems);
+            addEventListenerIfPresent('paste-btn', 'click', pasteItems);
+
+            document.querySelectorAll('.layout-btn').forEach(btn => btn.addEventListener('click', (e) => {
+                document.querySelector('.layout-btn.active')?.classList.remove('active');
+                const target = e.currentTarget; target.classList.add('active'); currentLayout = target.id === 'large-icons-btn' ? 'grid' : 'details';
+                fileTableView.style.display = currentLayout === 'details' ? 'block' : 'none';
+                fileGridView.style.display = currentLayout === 'grid' ? 'flex' : 'none';
+            }));
+
+            navBackBtn.addEventListener('click', () => { if (history.past.length > 0) { history.future.unshift(currentPath); navigateTo(history.past.pop(), true); } });
+            navForwardBtn.addEventListener('click', () => { if (history.future.length > 0) { history.past.push(currentPath); navigateTo(history.future.shift(), true); } });
+            navUpBtn.addEventListener('click', () => { if (currentPath !== '/') navigateTo(currentPath.substring(0, currentPath.lastIndexOf('/')) || '/'); });
+            fileInput.addEventListener('change', (e) => uploadFiles(e.target.files, false));
+            folderInput.addEventListener('change', (e) => uploadFiles(e.target.files, true));
+            searchBox.addEventListener('input', () => { const term = searchBox.value.trim(); if (term === '') { if (isSearchMode) navigateTo(currentPath); } else { searchFiles(term); } });
+            getEl('nav-home').addEventListener('click', () => navigateTo('/'));
+            const body = document.body;
+            body.addEventListener('dragenter', (e) => { e.preventDefault(); dragDropOverlay.classList.add('visible'); });
+            body.addEventListener('dragover', (e) => { e.preventDefault(); });
+            body.addEventListener('dragleave', (e) => { if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) dragDropOverlay.classList.remove('visible'); });
+            body.addEventListener('drop', (e) => { e.preventDefault(); dragDropOverlay.classList.remove('visible'); uploadFiles(e.dataTransfer.files, false); });
+            contentArea.addEventListener('mousedown', startSelection);
+            contentArea.addEventListener('contextmenu', (e) => { if (e.target.closest('.file-item') || e.target.closest('.grid-item')) return; e.preventDefault(); showViewContextMenu(e); });
+
+            loadFavorites();
+            loadDirectory(currentPath);
+            updateNavButtons();
+        });
     </script>
 </body>
 </html>
