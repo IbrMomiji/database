@@ -7,7 +7,7 @@ class WindowManager {
         this.windows = new Map();
         this.windowIdCounter = 0;
         this.highestZIndex = 100;
-        this.zOrder = []; 
+        this.zOrder = [];
         this.snapIndicator = document.querySelector('.snap-indicator');
         this.minimizedArea = document.getElementById('minimized-area');
         this.activeDrag = null;
@@ -40,8 +40,16 @@ class WindowManager {
                     params.append('file', options.filePath);
                 }
                 iframe.src = `system/application/notepad.php?${params.toString()}`;
-            } else if (type === 'explorer') { // エクスプローラーのパスを追加
+            } else if (type === 'explorer') {
                  iframe.src = `system/application/explorer.php`;
+            } else if (type === 'share') {
+                const params = new URLSearchParams();
+                if (options.itemPath) {
+                    params.append('item_path', options.itemPath);
+                }
+                iframe.src = `share.php?${params.toString()}`;
+            } else if (type === 'share-manager') {
+                 iframe.src = `share_manager.php`;
             } else if (type === 'file_explorer_dialog') {
                 const params = new URLSearchParams({
                     source: options.sourceWindowId,
@@ -54,10 +62,10 @@ class WindowManager {
                 newWindowEl.style.height = '420px';
             }
         }
-        
+
         newWindowEl.style.left = `${60 + this.windows.size * 30}px`;
         newWindowEl.style.top = `${60 + this.windows.size * 30}px`;
-        
+
         this.container.appendChild(newWindowEl);
 
         const windowInstance = { id, el: newWindowEl, type, state: 'normal', prevRect: {}, controller: null };
@@ -67,10 +75,10 @@ class WindowManager {
 
         this.windows.set(id, windowInstance);
         this._makeInteractive(windowInstance);
-        
+
         this.focus(id);
     }
-    
+
     focus(id) {
         this.bringToFront(id);
         const win = this.windows.get(id);
@@ -86,27 +94,58 @@ class WindowManager {
         }
     }
 
+    async _handleShareFormSubmit(event) {
+        const { action, formData } = event.data;
+        const apiFormData = new FormData();
+        apiFormData.append('action', action);
+        for (const key in formData) {
+            apiFormData.append(key, formData[key]);
+        }
+
+        let result;
+        try {
+            const response = await fetch('share_api.php', { method: 'POST', body: apiFormData });
+            result = await response.json();
+        } catch (error) {
+            result = { success: false, message: '通信エラー: ' + error.message };
+        }
+
+        for (const [id, win] of this.windows.entries()) {
+            const iframe = win.el.querySelector('iframe');
+            if (iframe && iframe.contentWindow === event.source) {
+                iframe.contentWindow.postMessage({
+                    type: 'shareFormResult',
+                    action: action,
+                    result: result
+                }, '*');
+                break;
+            }
+        }
+    }
+
     _setupMessageListener() {
         window.addEventListener('message', (event) => {
+            if (typeof event.data !== 'object' || event.data === null) return;
+            const { type } = event.data;
             try {
-                if (typeof event.data !== 'object' || event.data === null) {
+                if (type === 'submitShareForm') {
+                    this._handleShareFormSubmit(event);
                     return;
                 }
-                
-                const { type, sourceWindowId, mode, currentPath, filePath, app, windowId, title } = event.data;
+
+                const { sourceWindowId, mode, currentPath, filePath, app, windowId, title, itemPath } = event.data;
 
                 if (type === 'openWithApp') {
-                    if (app) {
-                        this.createWindow(app, { filePath: filePath });
-                    } else {
-                        throw new Error("Message 'openWithApp' requires an 'app' property.");
-                    }
+                    this.createWindow(app, { filePath: filePath });
+                } else if (type === 'openShareWindow') {
+                    this.createWindow('share', { itemPath: itemPath });
+                } else if (type === 'openShareManager') {
+                    this.createWindow('share-manager');
                 } else if (type === 'requestFileDialog') {
                     this.createWindow('file_explorer_dialog', { sourceWindowId, mode, currentPath });
                 } else if (type === 'fileDialogResponse') {
                     for (const [id, win] of this.windows.entries()) {
-                        const iframe = win.el.querySelector('iframe');
-                        if (iframe && iframe.contentWindow === event.source) {
+                        if (win.el.querySelector('iframe')?.contentWindow === event.source) {
                             this.closeWindow(id);
                             break;
                         }
@@ -118,20 +157,15 @@ class WindowManager {
                 }
                 else if (type === 'setWindowTitle') {
                     for (const [id, win] of this.windows.entries()) {
-                        const iframe = win.el.querySelector('iframe');
-                        if (iframe && iframe.contentWindow === event.source) {
-                             const titleEl = win.el.querySelector('.window-title');
-                             if (titleEl && title) {
-                                 titleEl.textContent = title;
-                             }
-                            break;
-                        }
+                         if (win.el.querySelector('iframe')?.contentWindow === event.source) {
+                             win.el.querySelector('.window-title').textContent = title || '無題';
+                             break;
+                         }
                     }
                 }
                 else if (type === 'closeChildWindow' && windowId) {
                     for (const [id, win] of this.windows.entries()) {
-                         const iframe = win.el.querySelector('iframe');
-                         if(iframe && iframe.name === windowId){
+                         if(win.el.querySelector('iframe')?.name === windowId){
                              this.closeWindow(id);
                              break;
                          }
@@ -151,7 +185,7 @@ class WindowManager {
             this.windows.delete(id);
             this.zOrder = this.zOrder.filter(winId => winId !== id);
         }
-        
+
         const nextWindow = this.getTopWindow();
         if (nextWindow) {
             this.focus(nextWindow.id);
@@ -163,7 +197,7 @@ class WindowManager {
     _makeInteractive(winInstance) {
         const { id, el } = winInstance;
         const titleBar = el.querySelector('.title-bar');
-        
+
         const onIconClick = (e) => {
              const rect = titleBar.getBoundingClientRect();
              this._showTitleBarContextMenu(e, winInstance, {x: rect.left, y: rect.bottom});
@@ -172,7 +206,7 @@ class WindowManager {
         const onTitleBarContextMenu = (e) => {
             this._showTitleBarContextMenu(e, winInstance, {x: e.clientX, y: e.clientY});
         };
-        
+
         const onMouseDown = () => this.focus(id);
         const onTitleBarMouseDown = e => this._onDragStart(e, winInstance);
         const onTitleBarDblClick = e => {
@@ -181,14 +215,14 @@ class WindowManager {
             }
         };
         const onResizerMouseDown = e => this._onResizeStart(e, winInstance);
-        
+
         const icon = el.querySelector('.title-bar-icon');
         if(icon) icon.addEventListener('click', onIconClick);
         titleBar.addEventListener('contextmenu', onTitleBarContextMenu);
         el.addEventListener('mousedown', onMouseDown, { capture: true });
         titleBar.addEventListener('mousedown', onTitleBarMouseDown);
         titleBar.addEventListener('dblclick', onTitleBarDblClick);
-        
+
         el.querySelector('.close-btn').addEventListener('click', () => this.closeWindow(id));
         const minimizeBtn = el.querySelector('.minimize-btn');
         if (minimizeBtn) minimizeBtn.addEventListener('click', () => this.minimizeWindow(id));
@@ -264,7 +298,7 @@ class WindowManager {
         const winData = this.windows.get(id);
         if (!winData) return;
         const win = winData.el;
-        
+
         if (winData.state === 'normal') {
             winData.prevRect = {
                 top: win.style.top, left: win.style.left,
@@ -273,7 +307,7 @@ class WindowManager {
         }
 
         win.classList.remove('maximized', 'snapped-left', 'snapped-right');
-        
+
         if (type === 'top') {
             this.toggleMaximize(id);
         } else {
@@ -283,16 +317,16 @@ class WindowManager {
             if(maximizeBtn) maximizeBtn.innerHTML = '&#10065;';
         }
     }
-    
+
     bringToFront(id) {
         const win = this.windows.get(id);
         if (!win) return;
-        
+
         win.el.style.zIndex = ++this.highestZIndex;
         this.zOrder = this.zOrder.filter(winId => winId !== id);
         this.zOrder.push(id);
     }
-    
+
     _showTitleBarContextMenu(e, winInstance, coords) {
         if (e && typeof e.preventDefault === 'function') {
             e.preventDefault();
@@ -300,11 +334,11 @@ class WindowManager {
         if (e && typeof e.stopPropagation === 'function') {
             e.stopPropagation();
         }
-        
+
         const { id, el } = winInstance;
         const winData = this.windows.get(id);
         if (!winData) return;
-        
+
         const { state } = winData;
         const isMaximizedOrSnapped = state === 'maximized' || state.startsWith('snapped');
 
@@ -324,27 +358,27 @@ class WindowManager {
             { type: 'separator' },
             { label: '閉じる', accelerator: 'C', action: () => this.closeWindow(id) },
         ];
-        
+
         if (el.querySelector('.minimize-btn')) {
              menuItems.splice(3, 0, { label: '最小化', accelerator: 'N', action: () => this.minimizeWindow(id) });
         }
-        
+
         contextMenu.show(coords.x, coords.y, menuItems, winInstance);
     }
 
     _onDragStart(e, winInstance) {
         if (e.target.closest('.window-controls') || e.target.closest('.title-bar-icon') || e.button !== 0) return;
         e.preventDefault();
-        
+
         this.focus(winInstance.id);
-        
+
         let dragOffsetX, dragOffsetY;
 
         if (winInstance.state === 'maximized' || winInstance.state.startsWith('snapped')) {
             const prevWidth = parseFloat(winInstance.prevRect?.width) || 700;
             const newLeft = e.clientX - (prevWidth * (e.clientX / window.innerWidth));
             this.toggleMaximize(winInstance.id);
-            
+
             winInstance.el.style.left = `${newLeft}px`;
             winInstance.el.style.top = `${e.clientY - 15}px`;
             dragOffsetX = e.clientX - newLeft;
@@ -362,7 +396,7 @@ class WindowManager {
     _onResizeStart(e, winInstance) {
         e.preventDefault();
         this.focus(winInstance.id);
-        
+
         if (winInstance.state !== 'normal') {
             this.toggleMaximize(winInstance.id);
         }
@@ -405,12 +439,12 @@ class WindowManager {
                      width: el.style.width, height: el.style.height
                  };
             }
-            
+
             this.focus(this.activeDrag.winInstance.id);
-            
+
             this.activeDrag = null;
         };
-        
+
         document.addEventListener('mousemove', onMouseMove);
         document.addEventListener('mouseup', onMouseUp);
         window.addEventListener('resize', () => this._hideSnapIndicator());
@@ -421,7 +455,7 @@ class WindowManager {
         const { clientX, clientY } = e;
         const snapMargin = 5;
         let snapType = null;
-        
+
         if (clientY <= snapMargin) snapType = 'top';
         else if (clientX <= snapMargin) snapType = 'left';
         else if (clientX >= window.innerWidth - snapMargin) snapType = 'right';
@@ -465,7 +499,7 @@ class WindowManager {
             winInstance.el.style.top = top + 'px';
         }
     }
-    
+
     _showSnapIndicator(type) {
         const { innerWidth: w, innerHeight: h } = window;
         this.snapIndicator.style.display = 'block';
@@ -473,7 +507,7 @@ class WindowManager {
         else if (type === "right") Object.assign(this.snapIndicator.style, { left: w / 2 + 'px', top: '0px', width: w / 2 + 'px', height: h + 'px' });
         else if (type === "top") Object.assign(this.snapIndicator.style, { left: '0px', top: '0px', width: w + 'px', height: h + 'px' });
     }
-    
+
     _hideSnapIndicator() {
         this.snapIndicator.style.display = 'none';
     }

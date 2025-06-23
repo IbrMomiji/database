@@ -1,5 +1,4 @@
 <?php
-// タイムゾーンを東京に設定
 date_default_timezone_set('Asia/Tokyo');
 
 require_once __DIR__ . '/../boot.php';
@@ -135,7 +134,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $path = $_POST['path'] ?? '/';
 
     try {
-        if (!in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites', 'get_users_for_sharing', 'create_share', 'get_shares_for_item', 'delete_share', 'get_all_shares'])) {
+        if (!in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites'])) {
              $safe_path = getSafePath($user_dir, $path);
              if ($safe_path === false) {
                  throw new Exception('無効なパスです。');
@@ -174,19 +173,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 });
                 echo json_encode(['success' => true, 'path' => $path, 'files' => $files]);
                 break;
-            
+
             case 'move':
                 $items_to_move = json_decode($_POST['items'] ?? '[]', true);
                 $destination_path = $_POST['destination'] ?? '';
                 if (empty($items_to_move) || empty($destination_path)) {
                     throw new Exception('移動するアイテムまたは移動先が指定されていません。');
                 }
-            
+
                 $dest_dir_path = getSafePath($user_dir, $destination_path);
                 if ($dest_dir_path === false || !is_dir($dest_dir_path)) {
                     throw new Exception('無効な移動先ディレクトリです。');
                 }
-            
+
                 $errors = [];
                 foreach ($items_to_move as $item) {
                     $source_path = getSafePath($user_dir, $item['path']);
@@ -194,18 +193,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $errors[] = "'{$item['name']}' が見つかりません。";
                         continue;
                     }
-            
+
                     if (basename($source_path) === SETTINGS_DIR) {
-                        continue; 
+                        continue;
                     }
-            
+
                     $new_path = $dest_dir_path . DIRECTORY_SEPARATOR . basename($source_path);
-            
+
                     if (strpos($dest_dir_path, $source_path) === 0) {
                         $errors[] = "自分自身の中に '{$item['name']}' を移動することはできません。";
                         continue;
                     }
-            
+
                     if (realpath($source_path) == realpath($new_path)) {
                         continue;
                     }
@@ -214,16 +213,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $errors[] = "移動先に同じ名前のアイテム '{$item['name']}' が既に存在します。";
                         continue;
                     }
-            
+
                     if (!rename($source_path, $new_path)) {
                         $errors[] = "'{$item['name']}' の移動に失敗しました。";
                     }
                 }
-            
+
                 if (!empty($errors)) {
                     throw new Exception(implode("\n", $errors));
                 }
-            
+
                 echo json_encode(['success' => true, 'message' => 'アイテムを移動しました。']);
                 break;
 
@@ -247,110 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $used_size = getDirectorySize($user_dir);
                 echo json_encode(['success' => true, 'used' => $used_size, 'total' => MAX_STORAGE_BYTES, 'used_formatted' => formatBytes($used_size), 'total_formatted' => formatBytes(MAX_STORAGE_BYTES)]);
                 break;
-            
-            case 'get_users_for_sharing':
-                $term = $_POST['term'] ?? '';
-                $owner_id = $_SESSION['user_id'];
-                $stmt = $db->prepare("SELECT id, username FROM users WHERE username LIKE :term AND id != :owner_id LIMIT 10");
-                $stmt->execute([':term' => "%$term%", ':owner_id' => $owner_id]);
-                $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                echo json_encode(['success' => true, 'users' => $users]);
-                break;
 
-            case 'get_all_shares':
-                 $stmt = $db->prepare("SELECT * FROM shares WHERE owner_user_id = :owner_user_id ORDER BY created_at DESC");
-                 $stmt->execute([':owner_user_id' => $_SESSION['user_id']]);
-                 $shares = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                 echo json_encode(['success' => true, 'shares' => $shares]);
-                 break;
-
-            case 'get_shares_for_item':
-                $item_path = $_POST['item_path'] ?? '';
-                if (empty($item_path)) throw new Exception('アイテムが指定されていません。');
-                
-                $stmt = $db->prepare("SELECT * FROM shares WHERE owner_user_id = :owner_user_id AND source_path = :source_path");
-                $stmt->execute([':owner_user_id' => $_SESSION['user_id'], ':source_path' => $item_path]);
-                $shares = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                $share = $shares[0] ?? null;
-
-                if ($share) {
-                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-                    $host = $_SERVER['HTTP_HOST'];
-                    $base_uri = preg_replace('/\/system\/application$/', '', dirname($_SERVER['SCRIPT_NAME']));
-                    $share['url'] = $protocol . $host . $base_uri . "/share.php?id=" . $share['share_id'];
-                }
-
-                echo json_encode(['success' => true, 'share' => $share]);
-                break;
-
-            case 'create_share':
-                $item_path = $_POST['item_path'] ?? '';
-                $share_type = $_POST['share_type'] ?? 'public';
-                $password = $_POST['password'] ?? '';
-                $expires_at = $_POST['expires_at'] ?? null;
-                $recipient_ids = isset($_POST['recipients']) ? json_decode($_POST['recipients'], true) : [];
-
-                if (empty($item_path)) throw new Exception('共有するアイテムが指定されていません。');
-                
-                $source_full_path = getSafePath($user_dir, $item_path);
-                if (!file_exists($source_full_path)) throw new Exception('共有元のアイテムが見つかりません。');
-                
-                $stmt_delete = $db->prepare("DELETE FROM shares WHERE owner_user_id = :owner_user_id AND source_path = :source_path");
-                $stmt_delete->execute([':owner_user_id' => $_SESSION['user_id'], ':source_path' => $item_path]);
-
-                $share_id = bin2hex(random_bytes(8));
-                $password_hash = !empty($password) ? password_hash($password, PASSWORD_DEFAULT) : null;
-                
-                $db->beginTransaction();
-                try {
-                    $stmt = $db->prepare(
-                        "INSERT INTO shares (share_id, owner_user_id, source_path, share_type, password_hash, expires_at, created_at) 
-                        VALUES (:share_id, :owner_user_id, :source_path, :share_type, :password_hash, :expires_at, CURRENT_TIMESTAMP)"
-                    );
-                    $stmt->execute([
-                        ':share_id' => $share_id,
-                        ':owner_user_id' => $_SESSION['user_id'],
-                        ':source_path' => $item_path,
-                        ':share_type' => $share_type,
-                        ':password_hash' => $password_hash,
-                        ':expires_at' => empty($expires_at) ? null : $expires_at
-                    ]);
-                    $share_db_id = $db->lastInsertId();
-
-                    if ($share_type === 'private' && !empty($recipient_ids)) {
-                        $stmt_recipient = $db->prepare("INSERT INTO share_recipients (share_id, recipient_user_id) VALUES (:share_id, :recipient_user_id)");
-                        foreach ($recipient_ids as $recipient_id) {
-                            $stmt_recipient->execute([':share_id' => $share_db_id, ':recipient_user_id' => $recipient_id]);
-                        }
-                    }
-                    $db->commit();
-                } catch (Exception $e) {
-                    $db->rollBack();
-                    throw new Exception('データベースエラー: ' . $e->getMessage());
-                }
-                
-                $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-                $host = $_SERVER['HTTP_HOST'];
-                $base_uri = preg_replace('/\/system\/application$/', '', dirname($_SERVER['SCRIPT_NAME']));
-                $share_url = $protocol . $host . $base_uri . "/share.php?id=" . $share_id;
-
-                echo json_encode(['success' => true, 'message' => '共有リンクを作成・更新しました。', 'url' => $share_url, 'share_id' => $share_id]);
-                break;
-            
-            case 'delete_share':
-                $share_id = $_POST['share_id'] ?? '';
-                if (empty($share_id)) throw new Exception('共有IDが指定されていません。');
-                
-                $stmt = $db->prepare("DELETE FROM shares WHERE share_id = :share_id AND owner_user_id = :owner_user_id");
-                $stmt->execute([':share_id' => $share_id, ':owner_user_id' => $_SESSION['user_id']]);
-                
-                if ($stmt->rowCount() > 0) {
-                    echo json_encode(['success' => true, 'message' => '共有を停止しました。']);
-                } else {
-                    throw new Exception('共有の停止に失敗したか、権限がありません。');
-                }
-                break;
-                
             case 'upload':
                 if (empty($_FILES['files']['name'][0])) throw new Exception('アップロードされたファイルがありません。');
                 $total_size = array_sum($_FILES['files']['size']); if (getDirectorySize($user_dir) + $total_size > MAX_STORAGE_BYTES) throw new Exception('ストレージ容量不足です。');
@@ -470,26 +366,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             --accent-color: #4cc2ff;
         }
         html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: var(--font-family); font-size: 14px; background: var(--bg-color); color: var(--text-color); }
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6); align-items: center; justify-content: center; }
-        .modal-content { background-color: var(--bg-header); padding: 20px; border: 1px solid var(--border-color); width: 90%; max-width: 600px; border-radius: 8px; position: relative; }
-        .modal-header { padding-bottom: 10px; border-bottom: 1px solid var(--border-color); margin-bottom: 15px; }
-        .modal-footer { padding-top: 15px; border-top: 1px solid var(--border-color); text-align: right; margin-top: 20px; display: flex; justify-content: space-between;}
-        .close-button { color: #aaa; position: absolute; top: 10px; right: 20px; font-size: 28px; font-weight: bold; }
-        .close-button:hover, .close-button:focus { color: white; text-decoration: none; cursor: pointer; }
-        .modal-body label, .modal-body p { margin: 10px 0 5px; display: block; }
-        .modal-body input[type="text"], .modal-body input[type="password"], .modal-body input[type="datetime-local"] { width: 100%; padding: 8px; background-color: var(--bg-tertiary-color); border: 1px solid var(--border-color); color: var(--text-color); border-radius: 4px; box-sizing: border-box; }
-        #user-search-results { max-height: 100px; overflow-y: auto; border: 1px solid var(--border-color); background: var(--bg-tertiary-color); margin-top: 5px; }
-        #user-search-results div { padding: 5px; cursor: pointer; }
-        #user-search-results div:hover { background-color: var(--bg-hover); }
-        #selected-recipients-list span { display: inline-block; background: var(--accent-color); color: black; padding: 2px 8px; margin: 2px; border-radius: 12px; font-size: 12px; }
-        #selected-recipients-list span button { background: none; border: none; color: black; font-weight: bold; cursor: pointer; padding-left: 6px; }
-        #stop-share-btn { background-color: #c00; color: white; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;}
-        #stop-share-btn:hover { background-color: #a00; }
-        #create-share-btn, #manage-shares-modal .button { background-color: var(--accent-color); color: black; border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer;}
-        #create-share-btn:hover, #manage-shares-modal .button:hover { opacity: 0.9; }
-        #manage-shares-modal table { width: 100%; margin-top: 10px; border-collapse: collapse; }
-        #manage-shares-modal th, #manage-shares-modal td { padding: 8px; border: 1px solid var(--border-color); text-align: left; word-break: break-all; }
-        #manage-shares-modal .stop-share-list-btn { font-size: 12px; padding: 4px 8px; background-color: #c00; color: white; border:none; border-radius:4px; cursor:pointer;}
         ::-webkit-scrollbar { width: 12px; }
         ::-webkit-scrollbar-track { background: var(--bg-color); }
         ::-webkit-scrollbar-thumb { background-color: #555; border-radius: 10px; border: 3px solid var(--bg-color); }
@@ -694,72 +570,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             </div>
         </div>
     </div>
-    
-    <div id="share-modal" class="modal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <span class="close-button" id="close-share-modal">&times;</span>
-          <h2 id="share-modal-title">アイテムを共有</h2>
-        </div>
-        <div class="modal-body">
-            <p>共有設定:</p>
-            <div>
-                <input type="radio" id="share-type-public" name="share-type" value="public" checked>
-                <label for="share-type-public">リンクを知っている全員</label>
-            </div>
-            <div>
-                <input type="radio" id="share-type-private" name="share-type" value="private">
-                <label for="share-type-private">特定のユーザー</label>
-            </div>
-            <div id="private-share-options" style="display:none; margin-top:10px;">
-                <label for="share-recipients-input">ユーザーを検索:</label>
-                <input type="text" id="share-recipients-input" placeholder="ユーザー名で検索...">
-                <div id="user-search-results"></div>
-                <p>共有相手:</p>
-                <div id="selected-recipients-list"></div>
-            </div>
-            <div style="margin-top:10px;">
-                <label for="share-password">パスワード (任意):</label>
-                <input type="password" id="share-password" autocomplete="new-password">
-            </div>
-            <div style="margin-top:10px;">
-                <label for="share-expires">有効期限 (任意):</label>
-                <input type="datetime-local" id="share-expires">
-            </div>
-            <hr style="margin: 20px 0;">
-            <p>生成されたリンク:</p>
-            <input type="text" id="share-link-input" readonly>
-        </div>
-        <div class="modal-footer">
-          <button id="stop-share-btn" style="display: none;">共有を停止</button>
-          <button id="create-share-btn">リンクを作成・更新</button>
-        </div>
-      </div>
-    </div>
-
-    <div id="manage-shares-modal" class="modal">
-      <div class="modal-content">
-        <div class="modal-header">
-          <span class="close-button" id="close-manage-shares-modal">&times;</span>
-          <h2>共有の管理</h2>
-        </div>
-        <div class="modal-body">
-            <table id="manage-shares-table">
-                <thead>
-                    <tr>
-                        <th>アイテムパス</th>
-                        <th>共有方法</th>
-                        <th>パスワード</th>
-                        <th>有効期限</th>
-                        <th>操作</th>
-                    </tr>
-                </thead>
-                <tbody id="manage-shares-list">
-                </tbody>
-            </table>
-        </div>
-      </div>
-    </div>
 
     <input type="file" id="file-input" multiple hidden><input type="file" id="folder-input" webkitdirectory directory multiple hidden>
     <div id="drag-drop-overlay">ファイルをここにドロップ</div>
@@ -793,24 +603,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             const explorerContainer = document.querySelector('.explorer-container');
             const contentArea = getEl('content-area');
             const selectionRectangle = getEl('selection-rectangle');
-            const shareModal = getEl('share-modal');
-            const manageSharesModal = getEl('manage-shares-modal');
             const shareBtn = getEl('share-btn');
             const manageSharesBtn = getEl('manage-shares-btn');
-            const closeShareModalBtn = getEl('close-share-modal');
-            const closeManageSharesModalBtn = getEl('close-manage-shares-modal');
-            const createShareBtn = getEl('create-share-btn');
-            const stopShareBtn = getEl('stop-share-btn');
-            const shareModalTitle = getEl('share-modal-title');
-            const shareLinkInput = getEl('share-link-input');
-            const privateShareOptions = getEl('private-share-options');
-            const recipientsInput = getEl('share-recipients-input');
-            const userSearchResults = getEl('user-search-results');
-            const selectedRecipientsList = getEl('selected-recipients-list');
-            const sharePasswordField = getEl('share-password');
-            const shareExpiresField = getEl('share-expires');
-            let selectedRecipients = new Map();
-            let currentShareId = null;
+
             let currentPath = '/', selectedItems = new Map(), contextMenu = null, isSearchMode = false, favorites = [], currentLayout = 'details';
             let clipboard = { type: null, items: [] };
             let isSelecting = false, startX = 0, startY = 0, contentAreaRect;
@@ -1176,13 +971,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             };
             const loadFavorites = async () => {
                 const data = await apiCall('get_favorites', new FormData());
-                if (data && data.success) { 
+                if (data && data.success) {
                     favorites = data.favorites || [];
-                    renderFavorites(); 
+                    renderFavorites();
                 }
             };
             const saveFavorites = async () => {
-                const formData = new FormData(); 
+                const formData = new FormData();
                 formData.append('favorites', JSON.stringify(favorites));
                 await apiCall('save_favorites', formData);
             };
@@ -1209,16 +1004,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 positionMenu(contextMenu, e.clientX, e.clientY);
             };
             const addFavorite = (path, name) => {
-                if (!favorites.some(fav => fav.path === path)) { 
-                    favorites.push({ path, name }); 
-                    saveFavorites(); 
-                    renderFavorites(); 
+                if (!favorites.some(fav => fav.path === path)) {
+                    favorites.push({ path, name });
+                    saveFavorites();
+                    renderFavorites();
                 }
             };
-            const removeFavorite = (path) => { 
-                favorites = favorites.filter(fav => fav.path !== path); 
-                saveFavorites(); 
-                renderFavorites(); 
+            const removeFavorite = (path) => {
+                favorites = favorites.filter(fav => fav.path !== path);
+                saveFavorites();
+                renderFavorites();
             };
             const showViewContextMenu = (e) => {
                 hideContextMenu();
@@ -1293,164 +1088,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 document.removeEventListener('mousemove', doSelection);
                 document.removeEventListener('mouseup', endSelection);
             };
-            
-            const resetShareModal = () => {
-                shareLinkInput.value = '';
-                sharePasswordField.value = '';
-                sharePasswordField.placeholder = 'パスワード (任意)';
-                shareExpiresField.value = '';
-                getEl('share-type-public').checked = true;
-                privateShareOptions.style.display = 'none';
-                selectedRecipients.clear();
-                renderSelectedRecipients();
-                stopShareBtn.style.display = 'none';
-                currentShareId = null;
-            };
 
-            shareBtn.addEventListener('click', async () => {
-                if(selectedItems.size !== 1) return;
-                resetShareModal();
+            addEventListenerIfPresent('share-btn', 'click', () => {
+                if (selectedItems.size !== 1) return;
                 const itemPath = selectedItems.keys().next().value;
-                const itemName = selectedItems.get(itemPath).name;
-                getEl('share-modal-title').textContent = `「${itemName}」を共有`;
-                
-                const formData = new FormData();
-                formData.append('item_path', itemPath);
-                const data = await apiCall('get_shares_for_item', formData);
-
-                if(data && data.success && data.share) {
-                    const share = data.share;
-                    currentShareId = share.share_id;
-                    shareLinkInput.value = share.url;
-                    sharePasswordField.placeholder = "パスワードを変更しない場合は空のまま";
-                    shareExpiresField.value = share.expires_at ? share.expires_at.replace(' ', 'T') : '';
-                    stopShareBtn.style.display = 'inline-block';
-                }
-                shareModal.style.display = "flex";
+                window.parent.postMessage({
+                    type: 'openShareWindow',
+                    itemPath: itemPath
+                }, '*');
             });
 
-            createShareBtn.addEventListener('click', async () => {
-                const itemPath = selectedItems.keys().next().value;
-                if (!itemPath) return;
-                const formData = new FormData();
-                formData.append('item_path', itemPath);
-                formData.append('share_type', document.querySelector('input[name="share-type"]:checked').value);
-                formData.append('password', sharePasswordField.value);
-                formData.append('expires_at', shareExpiresField.value);
-                if (document.querySelector('input[name="share-type"]:checked').value === 'private') {
-                    formData.append('recipients', JSON.stringify(Array.from(selectedRecipients.keys())));
-                }
-                const result = await apiCall('create_share', formData);
-                if (result && result.success) {
-                    shareLinkInput.value = result.url;
-                    currentShareId = result.share_id;
-                    stopShareBtn.style.display = 'inline-block';
-                    alert(result.message);
-                }
+            addEventListenerIfPresent('manage-shares-btn', 'click', () => {
+                window.parent.postMessage({
+                    type: 'openShareManager'
+                }, '*');
             });
-
-            stopShareBtn.addEventListener('click', async () => {
-                if (!currentShareId || !confirm('この共有を停止しますか？リンクは無効になります。')) return;
-                const formData = new FormData();
-                formData.append('share_id', currentShareId);
-                const result = await apiCall('delete_share', formData);
-                if (result && result.success) {
-                    alert(result.message);
-                    resetShareModal();
-                    shareModal.style.display = 'none';
-                }
-            });
-            
-            const openManageSharesModal = async () => {
-                const manageSharesList = getEl('manage-shares-list');
-                manageSharesList.innerHTML = '<tr><td colspan="5">読み込み中...</td></tr>';
-                manageSharesModal.style.display = 'flex';
-                const data = await apiCall('get_all_shares', new FormData());
-                manageSharesList.innerHTML = '';
-                if(data && data.success && data.shares.length > 0) {
-                    data.shares.forEach(share => {
-                        const row = manageSharesList.insertRow();
-                        row.dataset.shareId = share.share_id;
-                        row.innerHTML = `
-                            <td>${share.source_path}</td>
-                            <td>${share.share_type === 'public' ? '全員' : 'プライベート'}</td>
-                            <td>${share.password_hash ? 'あり' : 'なし'}</td>
-                            <td>${share.expires_at || '無期限'}</td>
-                            <td><button class="stop-share-list-btn" data-share-id="${share.share_id}">停止</button></td>
-                        `;
-                    });
-                } else {
-                    manageSharesList.innerHTML = '<tr><td colspan="5">共有中のアイテムはありません。</td></tr>';
-                }
-            };
-            
-            getEl('manage-shares-list').addEventListener('click', async (e) => {
-                if (e.target.classList.contains('stop-share-list-btn')) {
-                    const shareIdToStop = e.target.dataset.shareId;
-                    if (!shareIdToStop || !confirm(`この共有を停止しますか？`)) return;
-                    const formData = new FormData();
-                    formData.append('share_id', shareIdToStop);
-                    const result = await apiCall('delete_share', formData);
-                    if (result && result.success) {
-                        alert(result.message);
-                        e.target.closest('tr').remove();
-                    }
-                }
-            });
-
-            manageSharesBtn.addEventListener('click', openManageSharesModal);
-            closeShareModalBtn.onclick = () => shareModal.style.display = "none";
-            closeManageSharesModalBtn.onclick = () => manageSharesModal.style.display = "none";
-            
-            window.onclick = (event) => {
-                if (event.target == shareModal) shareModal.style.display = "none";
-                if (event.target == manageSharesModal) manageSharesModal.style.display = "none";
-            };
-            
-            document.querySelectorAll('input[name="share-type"]').forEach(radio => {
-                radio.addEventListener('change', (e) => {
-                    privateShareOptions.style.display = e.target.value === 'private' ? 'block' : 'none';
-                });
-            });
-
-            recipientsInput.addEventListener('input', async (e) => {
-                const term = e.target.value.trim();
-                userSearchResults.innerHTML = '';
-                if (term.length < 1) return;
-                const formData = new FormData();
-                formData.append('term', term);
-                const data = await apiCall('get_users_for_sharing', formData);
-                if (data && data.success) {
-                    data.users.forEach(user => {
-                        if(selectedRecipients.has(user.id)) return;
-                        const userDiv = document.createElement('div');
-                        userDiv.textContent = user.username;
-                        userDiv.onclick = () => {
-                            selectedRecipients.set(user.id, user.username);
-                            renderSelectedRecipients();
-                            recipientsInput.value = '';
-                            userSearchResults.innerHTML = '';
-                        };
-                        userSearchResults.appendChild(userDiv);
-                    });
-                }
-            });
-
-            const renderSelectedRecipients = () => {
-                selectedRecipientsList.innerHTML = '';
-                selectedRecipients.forEach((username, id) => {
-                    const recipientTag = document.createElement('span');
-                    recipientTag.textContent = username;
-                    const removeBtn = document.createElement('button');
-                    removeBtn.textContent = '×';
-                    removeBtn.onclick = () => {
-                        selectedRecipients.delete(id);
-                        renderSelectedRecipients();
-                    };
-                    recipientTag.appendChild(removeBtn);
-                    selectedRecipientsList.appendChild(recipientTag);
-                });
-            }
 
             document.querySelectorAll('.header-tabs .tab-item').forEach(tab => tab.addEventListener('click', (e) => {
                 document.querySelector('.header-tabs .tab-item.active')?.classList.remove('active');
@@ -1460,7 +1112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     toolbar.classList.toggle('active', toolbar.id === targetToolbarId);
                 });
             }));
-            
+
             document.addEventListener('click', (e) => {
                 if(e.target.closest('.context-menu-item')) {
                     const item = e.target.closest('.context-menu-item');
@@ -1476,7 +1128,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 } else if (contextMenu && !contextMenu.contains(e.target)) {
                      hideContextMenu();
                 }
-                
+
                 const clickedInside = e.target.closest('.content-area, .toolbar, .nav-pane, .address-bar-container, .modal-content, .context-menu');
                 if (!clickedInside) {
                     selectedItems.clear();
@@ -1487,8 +1139,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             document.addEventListener('keydown', (e) => {
                 if (e.key === 'Escape') {
                     hideContextMenu();
-                    shareModal.style.display = 'none';
-                    manageSharesModal.style.display = 'none';
                 }
                 if (document.activeElement.tagName === 'INPUT') return;
                 if (e.key === 'Delete' && selectedItems.size > 0) deleteItems();
@@ -1500,7 +1150,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 if (e.ctrlKey && e.key.toLowerCase() === 'x') { e.preventDefault(); cutItems(); }
                 if (e.ctrlKey && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteItems(); }
             });
-            
+
             addEventListenerIfPresent('upload-file-btn', 'click', () => fileInput.click());
             addEventListenerIfPresent('upload-folder-btn', 'click', () => folderInput.click());
             addEventListenerIfPresent('preview-pane-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); previewPane.classList.toggle('active'); showPreview(); });

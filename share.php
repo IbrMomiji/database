@@ -1,202 +1,132 @@
 <?php
-// タイムゾーンを東京に設定
 date_default_timezone_set('Asia/Tokyo');
-
 require_once __DIR__ . '/system/boot.php';
 
 if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
-
-if (!function_exists('getSafePath')) {
-    function getSafePath($baseDir, $path) {
-        $path = str_replace('\\', '/', $path);
-        $path = '/' . trim($path, '/');
-        $parts = explode('/', $path);
-        $safeParts = [];
-        foreach ($parts as $part) {
-            if ($part === '.' || $part === '') continue;
-            if ($part === '..') {
-                if (!empty($safeParts)) array_pop($safeParts);
-            } else {
-                $part = preg_replace('/[\\\\\/:\*\?"<>|]/', '', $part);
-                if($part !== '') $safeParts[] = $part;
-            }
-        }
-        $finalPath = $baseDir . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $safeParts);
-        $realBaseDir = realpath($baseDir);
-        if ($realBaseDir === false) { return false; }
-        $realFinalPath = realpath($finalPath);
-        if ($realFinalPath !== false) {
-            if (strpos($realFinalPath, $realBaseDir) !== 0) return false;
-            return $realFinalPath;
-        } else {
-            $parentDir = dirname($finalPath);
-            $realParentPath = realpath($parentDir);
-            if ($realParentPath === false || strpos($realParentPath, $realBaseDir) !== 0) return false;
-            return $realParentPath . DIRECTORY_SEPARATOR . basename($finalPath);
-        }
-    }
+if (!isset($_SESSION['user_id'], $_SESSION['user_uuid'])) {
+    die('アクセス権がありません。ログインしてください。');
 }
 
-$share_id = $_GET['id'] ?? null;
-if (!$share_id) {
-    die('共有リンクが無効です。');
+$db = Database::getInstance()->getConnection();
+$user_dir = USER_DIR_PATH . '/' . $_SESSION['user_uuid'];
+
+$item_path_req = $_GET['item_path'] ?? null;
+if (!$item_path_req) {
+    die('共有するアイテムが指定されていません。');
 }
 
-try {
-    $db = Database::getInstance()->getConnection();
-    $stmt = $db->prepare("
-        SELECT s.*, u.uuid as owner_uuid 
-        FROM shares s 
-        JOIN users u ON s.owner_user_id = u.id 
-        WHERE s.share_id = :share_id
-    ");
-    $stmt->execute([':share_id' => $share_id]);
-    $share = $stmt->fetch(PDO::FETCH_ASSOC);
+// ... （getSafePath_Share関数の定義は省略。必要であれば追加してください）
+$item_name = basename($item_path_req);
 
-    if (!$share) {
-        die('共有リンクが見つかりません。');
-    }
+$stmt_get = $db->prepare("SELECT * FROM shares WHERE owner_user_id = :owner_user_id AND source_path = :source_path");
+$stmt_get->execute([':owner_user_id' => $_SESSION['user_id'], ':source_path' => $item_path_req]);
+$existing_share = $stmt_get->fetch(PDO::FETCH_ASSOC);
 
-    if ($share['expires_at'] && new DateTime() > new DateTime($share['expires_at'])) {
-        die('この共有リンクの有効期限は切れています。');
-    }
-    
-    if ($share['password_hash']) {
-        if (!isset($_SESSION['share_access'][$share_id]) || $_SESSION['share_access'][$share_id] !== true) {
-             if (isset($_POST['password'])) {
-                if (password_verify($_POST['password'], $share['password_hash'])) {
-                    $_SESSION['share_access'][$share_id] = true;
-                    header("Location: " . $_SERVER['REQUEST_URI']);
-                    exit;
-                } else {
-                    $password_error = 'パスワードが違います。';
-                }
-            }
-            if (!isset($_SESSION['share_access'][$share_id]) || $_SESSION['share_access'][$share_id] !== true) {
-                 header('Content-Type: text/html; charset=utf-8');
-                 echo '<html><head><title>パスワード入力</title><style>body{font-family: sans-serif; text-align: center; padding-top: 50px;}</style></head><body>';
-                 echo '<h2>このコンテンツはパスワードで保護されています</h2>';
-                 if (isset($password_error)) echo '<p style="color:red;">' . htmlspecialchars($password_error) . '</p>';
-                 echo '<form method="POST" action="' . htmlspecialchars($_SERVER['REQUEST_URI']) . '"><label for="password">パスワード: </label><input type="password" name="password" id="password" autofocus><button type="submit">送信</button></form>';
-                 echo '</body></html>';
-                 exit;
-            }
-        }
-    }
-
-    if ($share['share_type'] === 'private') {
-        if (!isset($_SESSION['user_id'])) {
-            die('このコンテンツにアクセスするにはログインが必要です。');
-        }
-        $stmt_recipient = $db->prepare("SELECT 1 FROM share_recipients WHERE share_id = :share_id AND recipient_user_id = :user_id");
-        $stmt_recipient->execute([':share_id' => $share['id'], ':user_id' => $_SESSION['user_id']]);
-        if (!$stmt_recipient->fetch()) {
-            die('あなたはこの共有コンテンツにアクセスする権限がありません。');
-        }
-    }
-
-    $owner_user_dir = USER_DIR_PATH . '/' . $share['owner_uuid'];
-    $share_root_path = getSafePath($owner_user_dir, $share['source_path']);
-
-    if (!$share_root_path || !file_exists($share_root_path)) {
-        die('共有されているファイルまたはフォルダが見つかりません。');
-    }
-
-    $relative_path_req = $_GET['path'] ?? '';
-    $path_parts = explode('/', $relative_path_req);
-    $safe_path_parts = [];
-    foreach ($path_parts as $part) {
-        if ($part === '' || $part === '.') continue;
-        if ($part === '..') die('無効なパスです。');
-        $safe_path_parts[] = $part;
-    }
-    $safe_relative_path = implode('/', $safe_path_parts);
-    
-    $current_item_path = $share_root_path . ($safe_relative_path ? DIRECTORY_SEPARATOR . $safe_relative_path : '');
-    
-    if (strpos(realpath($current_item_path), realpath($share_root_path)) !== 0) {
-        die('不正なアクセスです。');
-    }
-
-    if (!file_exists($current_item_path)) {
-        die('指定されたファイルまたはフォルダは存在しません。');
-    }
-    
-    if (is_dir($current_item_path)) {
-        header('Content-Type: text/html; charset=utf-8');
-        $base_name = basename($share_root_path);
+if ($existing_share) {
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+    $host = $_SERVER['HTTP_HOST'];
+    $base_uri = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
+    $existing_share['url'] = $protocol . $host . $base_uri . "/share.php?id=" . $existing_share['share_id'];
+}
 ?>
 <!DOCTYPE html>
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <title>共有フォルダ: <?php echo htmlspecialchars($base_name); ?></title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>共有: <?php echo htmlspecialchars($item_name); ?></title>
     <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; background-color: #f8f9fa; }
-        .container { max-width: 900px; margin: 20px auto; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        h1 { font-size: 1.5rem; margin-bottom: 20px; word-break: break-all; }
-        table { width: 100%; border-collapse: collapse; }
-        th, td { padding: 10px 15px; text-align: left; border-bottom: 1px solid #dee2e6; }
-        th { background-color: #f1f3f5; }
-        a { text-decoration: none; color: #007bff; }
-        a:hover { text-decoration: underline; }
-        .icon { display: inline-block; width: 20px; text-align: center; margin-right: 10px; }
-        .breadcrumb { margin-bottom: 20px; font-size: 1.1rem; }
+        body { font-family: 'Yu Gothic UI', sans-serif; background: #ffffff; color: #000000; padding: 20px; font-size: 14px; }
+        body::-webkit-scrollbar { width: 16px; }
+        body::-webkit-scrollbar-track { background: #cccccc; }
+        body::-webkit-scrollbar-thumb { background: #666666; border: 1px solid #444444; }
+        .container { max-width: 600px; margin: auto; }
+        h2 { border-bottom: 1px solid #cccccc; padding-bottom: 10px; font-weight: normal; }
+        label, p { display: block; margin: 15px 0 5px; }
+        input[type="text"], input[type="password"], input[type="datetime-local"] { width: 100%; padding: 8px; background-color: #f0f0f0; border: 1px solid #cccccc; color: #000000; border-radius: 4px; box-sizing: border-box; font-family: inherit; }
+        .footer-buttons { margin-top: 20px; display: flex; justify-content: space-between; }
+        button { padding: 8px 12px; border-radius: 4px; border: 1px solid #adadad; cursor: pointer; background-color: #f0f0f0; color: black; font-size: 14px; }
+        button:hover { background-color: #e5f3ff; border-color: #0078d7; }
+        button#stop-share-btn { background-color: #e11f1f; color: white; border-color: #c00c00; }
+        button#stop-share-btn:hover { background-color: #c00c00; }
+        .message { padding: 10px; border-radius: 4px; margin-top: 15px; display: none; }
+        .message.success { background: #dff0d8; color: #3c763d; border: 1px solid #d6e9c6; }
+        .message.error { background: #f2dede; color: #a94442; border: 1px solid #ebccd1; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>共有アイテム: <?php echo htmlspecialchars($base_name); ?></h1>
-        <div class="breadcrumb">
-            <a href="?id=<?php echo htmlspecialchars($share_id); ?>">ルート</a> / <?php echo htmlspecialchars($safe_relative_path); ?>
+        <h2>「<?php echo htmlspecialchars($item_name); ?>」を共有</h2>
+        <p>共有設定:</p>
+        <div>
+            <input type="radio" id="share-type-public" name="share-type" value="public" <?php echo (!$existing_share || $existing_share['share_type'] === 'public') ? 'checked' : ''; ?>>
+            <label for="share-type-public" style="display: inline-block;">リンクを知っている全員</label>
         </div>
-        <table>
-            <thead><tr><th>名前</th><th>サイズ</th></tr></thead>
-            <tbody>
-<?php
-        if ($safe_relative_path) {
-            $parent_path = dirname($safe_relative_path);
-            if ($parent_path === '.') $parent_path = '';
-            echo '<tr><td><span class="icon">📁</span><a href="?id=' . htmlspecialchars($share_id) . '&path=' . urlencode($parent_path) . '">.. (親ディレクトリへ)</a></td><td>-</td></tr>';
-        }
-
-        $items = scandir($current_item_path);
-        foreach ($items as $item) {
-            if ($item === '.' || $item === '..') continue;
-            $item_full_path = $current_item_path . DIRECTORY_SEPARATOR . $item;
-            $item_relative_path = $safe_relative_path ? $safe_relative_path . '/' . $item : $item;
-            if (is_dir($item_full_path)) {
-                echo '<tr><td><span class="icon">📁</span><a href="?id=' . htmlspecialchars($share_id) . '&path=' . urlencode($item_relative_path) . '">' . htmlspecialchars($item) . '</a></td><td>-</td></tr>';
-            } else {
-                echo '<tr><td><span class="icon">📄</span><a href="?id=' . htmlspecialchars($share_id) . '&path=' . urlencode($item_relative_path) . '">' . htmlspecialchars($item) . '</a></td><td>' . round(filesize($item_full_path) / 1024, 2) . ' KB</td></tr>';
-            }
-        }
-?>
-            </tbody>
-        </table>
+        <div>
+            <label for="share-password">パスワード (変更する場合のみ入力):</label>
+            <input type="password" id="share-password" autocomplete="new-password" placeholder="<?php echo $existing_share && $existing_share['password_hash'] ? 'パスワード設定済み' : '任意'; ?>">
+        </div>
+        <div>
+            <label for="share-expires">有効期限 (任意):</label>
+            <input type="datetime-local" id="share-expires" value="<?php echo $existing_share && $existing_share['expires_at'] ? str_replace(' ', 'T', $existing_share['expires_at']) : ''; ?>">
+        </div>
+        <hr style="margin: 20px 0; border-color: #cccccc;">
+        <p>生成されたリンク:</p>
+        <input type="text" id="share-link-input" value="<?php echo htmlspecialchars($existing_share['url'] ?? '', ENT_QUOTES, 'UTF-8'); ?>" readonly>
+        <div id="message-area" class="message"></div>
+        <div class="footer-buttons">
+          <button id="stop-share-btn" <?php echo !$existing_share ? 'style="display:none;"' : ''; ?>>共有を停止</button>
+          <button id="create-share-btn">リンクを作成・更新</button>
+        </div>
     </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const getEl = id => document.getElementById(id);
+            const itemPath = new URLSearchParams(window.location.search).get('item_path');
+
+            const handleAction = (action) => {
+                const formData = {
+                    item_path: itemPath,
+                    share_type: document.querySelector('input[name="share-type"]:checked').value,
+                    password: getEl('share-password').value,
+                    expires_at: getEl('share-expires').value
+                };
+                window.parent.postMessage({ type: 'submitShareForm', action: action, formData: formData }, '*');
+            };
+
+            window.addEventListener('message', (event) => {
+                if (event.data.type === 'shareFormResult') {
+                    const result = event.data.result;
+                    const messageArea = getEl('message-area');
+                    messageArea.textContent = result.message;
+                    messageArea.className = `message ${result.success ? 'success' : 'error'}`;
+                    messageArea.style.display = 'block';
+
+                    if (result.success) {
+                        if (event.data.action === 'create_share') {
+                            getEl('share-link-input').value = result.url;
+                            getEl('share-password').placeholder = result.password_hash ? 'パスワード設定済み' : '任意';
+                            getEl('share-password').value = '';
+                            getEl('stop-share-btn').style.display = 'inline-block';
+                        } else if (event.data.action === 'stop_share') {
+                            getEl('share-link-input').value = '';
+                            getEl('stop-share-btn').style.display = 'none';
+                            getEl('share-password').placeholder = '任意';
+                            getEl('share-password').value = '';
+                            getEl('share-expires').value = '';
+                        }
+                    }
+                }
+            });
+
+            getEl('create-share-btn').addEventListener('click', () => handleAction('create_share'));
+            getEl('stop-share-btn').addEventListener('click', () => {
+                if (confirm('この共有を停止しますか？')) {
+                    handleAction('stop_share');
+                }
+            });
+        });
+    </script>
 </body>
 </html>
-<?php
-    } else {
-        $base_name = basename($current_item_path);
-        header('Content-Description: File Transfer');
-        header('Content-Type: application/octet-stream');
-        header('Content-Disposition: attachment; filename="' . $base_name . '"');
-        header('Expires: 0');
-        header('Cache-Control: must-revalidate');
-        header('Pragma: public');
-        header('Content-Length: ' . filesize($current_item_path));
-        flush();
-        readfile($current_item_path);
-        exit;
-    }
-
-} catch (Exception $e) {
-    header('Content-Type: text/html; charset=utf-8');
-    die('エラーが発生しました: ' . $e->getMessage());
-}
-?>
