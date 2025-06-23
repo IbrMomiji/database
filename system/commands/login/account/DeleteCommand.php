@@ -32,9 +32,10 @@ class DeleteCommand implements ICommand
                 $result = $auth->deleteAccount($password);
 
                 if ($result['success']) {
+                    $logoutMessage = $auth->logout();
                     $interactionState = null;
                     return [
-                        'output' => $result['message'],
+                        'output' => $result['message'] . "<br>" . $logoutMessage,
                         'logout' => true
                     ];
                 } else {
