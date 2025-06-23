@@ -4,7 +4,7 @@ if (session_status() == PHP_SESSION_NONE) {
 }
 
 // 定数を定義
-define('FILEDIALOG_USER_BASE_DIR', __DIR__ . '/../../user');
+define('FILEDIALOG_USER_BASE_DIR', __DIR__ . '/../../users');
 define('FILEDIALOG_SETTINGS_DIR', '.settings');
 
 // 認証チェック

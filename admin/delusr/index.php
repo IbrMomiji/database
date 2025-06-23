@@ -4,7 +4,7 @@ if (!defined('DB_PATH')) {
     define('DB_PATH', BASE_PATH . '/db/database.sqlite');
 }
 if (!defined('USER_DIR_PATH')) {
-    define('USER_DIR_PATH', BASE_PATH . '/user'); // パスを 'user' に修正
+    define('USER_DIR_PATH', BASE_PATH . '/users'); // パスを 'user' に修正
 }
 
 if (session_status() === PHP_SESSION_NONE) {

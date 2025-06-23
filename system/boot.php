@@ -17,7 +17,7 @@ if (session_status() == PHP_SESSION_NONE) {
 }
 
 define('DB_PATH', __DIR__ . '/../db/database.sqlite');
-define('USER_DIR_PATH', __DIR__ . '/../user');
+define('USER_DIR_PATH', __DIR__ . '/../users');
 
 spl_autoload_register(function ($class_name) {
     $file = __DIR__ . '/' . $class_name . '.php';

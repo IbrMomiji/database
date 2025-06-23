@@ -7,7 +7,7 @@ if (session_status() == PHP_SESSION_NONE) {
     session_start();
 }
 
-define('NOTEPAD_USER_BASE_DIR', __DIR__ . '/../../user');
+define('NOTEPAD_USER_BASE_DIR', __DIR__ . '/../../users');
 define('SETTINGS_DIR', '.settings');
 define('NOTEPAD_SETTINGS_FILE', SETTINGS_DIR . '/.notepad.json');
 

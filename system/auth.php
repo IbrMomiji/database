@@ -95,7 +95,7 @@ class Auth
                 mkdir(USER_DIR_PATH, 0775, true);
             }
             if (!is_writable(USER_DIR_PATH)) {
-                throw new Exception("'user' ディレクトリに書き込み権限がありません。");
+                throw new Exception("'users' ディレクトリに書き込み権限がありません。");
             }
             
             if (!mkdir($userDir, 0775)) {

@@ -20,7 +20,7 @@ if (!isset($_SESSION['username']) || $_SESSION['username'] !== 'root') {
 $db = Database::getInstance();
 $pdo = $db->getConnection();
 
-$usersBasePath = realpath(BASE_PATH . '/user') ?: (BASE_PATH . '/user');
+$usersBasePath = realpath(BASE_PATH . '/user') ?: (BASE_PATH . '/users');
 
 function listDirectoryFiles($dirPath) {
     if (!is_dir($dirPath) || !is_readable($dirPath)) {
@@ -65,7 +65,8 @@ $safe_selected_user = $selected_user && preg_match('/^[a-zA-Z0-9_\-]+$/', $selec
         }
         .bios-screen {
             width: 100%;
-            max-width: 900px; /* 横幅を少し広げる */
+            /* max-width: 900px; */
+            max-width: 100%;
             background: #0000AA;
             border: 2px solid #FFFFFF;
             padding: 0.5rem;
