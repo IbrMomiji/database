@@ -251,7 +251,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $relative_paths = isset($_POST['relative_paths']) ? json_decode($_POST['relative_paths'], true) : [];
                 foreach ($_FILES['files']['tmp_name'] as $index => $tmp_name) {
                     $file_name = count($relative_paths) > 0 ? $relative_paths[$index] : $_FILES['files']['name'][$index];
-                    $target_path = $safe_path . DIRECTORY_SEPARATOR . $file_name; $dir_path = dirname($target_path); // DIRECTORY_SEPARATOR
+                    $target_path = $safe_path . DIRECTORY_SEPARATOR . $file_name; $dir_path = dirname($target_path);
                     if (!is_dir($dir_path)) mkdir($dir_path, 0777, true);
                     if (!move_uploaded_file($tmp_name, $target_path)) throw new Exception("{$file_name} のアップロードに失敗しました。");
                 }
@@ -867,8 +867,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             } else if (e.ctrlKey) {
                 selectedItems.has(itemPath) ? selectedItems.delete(itemPath) : selectedItems.set(itemPath, fileData);
             } else if (e.shiftKey && selectedItems.size > 0) {
-                // Shift-click logic would go here, which can be complex.
-                // For now, it behaves like a normal click.
                 selectedItems.clear();
                 selectedItems.set(itemPath, fileData);
             } else {
@@ -914,15 +912,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 
             const hasSelection = selectedItems.size > 0;
             const canPaste = clipboard.items.length > 0;
-            const isSystem = fileInfo ? fileInfo.is_system : false;
             
             let menuItemsHTML = '';
             if (fileInfo) { // Item context menu
+                const isSystem = fileInfo.is_system;
                 const openActionText = fileInfo.is_dir ? '開く' : 'ダウンロード';
                 menuItemsHTML += `<div class="context-menu-item" data-action="open"><span class="label">${openActionText}</span></div>`;
                 if (!fileInfo.is_dir) menuItemsHTML += `<div class="context-menu-item has-submenu"><span class="label">アプリで開く</span><div class="submenu"><div class="context-menu-item" data-action="open-with-notepad"><span class="label">Notepad</span></div></div></div>`;
 
                 if (!isSystem) {
+                    if (fileInfo.is_dir) {
+                        const isFavorite = favorites.some(fav => fav.path === element.dataset.path);
+                        menuItemsHTML += `<div class="context-menu-item" data-action="${isFavorite ? 'remove_favorite' : 'add_favorite'}"><span class="label">${isFavorite ? 'お気に入りから削除' : 'お気に入りに追加'}</span></div>`;
+                    }
                     menuItemsHTML += `<div class="context-menu-separator"></div>`;
                     menuItemsHTML += `<div class="context-menu-item" data-action="cut"><span class="label">切り取り</span></div>`;
                     menuItemsHTML += `<div class="context-menu-separator"></div>`;
@@ -1036,13 +1038,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             if (clipboard.type === 'cut') {
                 result = await apiCall('move', formData);
             }
-            // Add else if (clipboard.type === 'copy') for copy functionality later
 
             if (result && result.success) {
-                clipboard = { type: null, items: [] }; // Clear clipboard on successful paste
+                clipboard = { type: null, items: [] };
                 loadDirectory(currentPath);
             } else {
-                updateSelection(); // Re-render to remove 'cut' style if paste fails
+                updateSelection();
             }
         };
         const downloadFile = (filePath) => { window.location.href = `?action=download&file=${encodeURIComponent(filePath)}`; };
@@ -1053,10 +1054,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         };
         const loadFavorites = async () => {
             const data = await apiCall('get_favorites', new FormData());
-            if (data && data.success) { favorites = data.favorites; renderFavorites(); }
+            if (data && data.success) { 
+                favorites = data.favorites || [];
+                renderFavorites(); 
+            }
         };
         const saveFavorites = async () => {
-            const formData = new FormData(); formData.append('favorites', JSON.stringify(favorites));
+            const formData = new FormData(); 
+            formData.append('favorites', JSON.stringify(favorites));
             await apiCall('save_favorites', formData);
         };
         const renderFavorites = () => {
@@ -1082,9 +1087,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             positionMenu(contextMenu, e.clientX, e.clientY);
             contextMenu.addEventListener('click', (ev) => {
                 ev.stopPropagation();
-                if(ev.target.closest('.context-menu-item').dataset.action === 'remove_favorite') removeFavorite(path);
+                const item = ev.target.closest('.context-menu-item');
+                if (item && item.dataset.action === 'remove_favorite') {
+                    removeFavorite(path);
+                }
                 hideContextMenu();
             });
+        };
+        const addFavorite = (path, name) => {
+            if (!favorites.some(fav => fav.path === path)) { 
+                favorites.push({ path, name }); 
+                saveFavorites(); 
+                renderFavorites(); 
+            }
+        };
+        const removeFavorite = (path) => { 
+            favorites = favorites.filter(fav => fav.path !== path); 
+            saveFavorites(); 
+            renderFavorites(); 
         };
         const showViewContextMenu = (e) => {
             hideContextMenu();
@@ -1093,10 +1113,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         const copyToClipboard = (text) => {
             navigator.clipboard.writeText(text).catch(err => console.error('クリップボードへのコピーに失敗:', err));
         };
-        const addFavorite = (path, name) => {
-            if (!favorites.some(fav => fav.path === path)) { favorites.push({ path, name }); saveFavorites(); renderFavorites(); }
-        };
-        const removeFavorite = (path) => { favorites = favorites.filter(fav => fav.path !== path); saveFavorites(); renderFavorites(); };
         const showPreview = () => {
             if (!previewPane.classList.contains('active') || selectedItems.size !== 1) {
                 previewContent.innerHTML = ''; previewPlaceholder.textContent = 'プレビューするファイルを選択してください'; previewPlaceholder.style.display = 'block';

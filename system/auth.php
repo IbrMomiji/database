@@ -163,14 +163,19 @@ class Auth
                 return ['success' => false, 'message' => 'エラー: そのユーザー名は既に使用されています。'];
             }
 
-            $currentUsername = $_SESSION['username'];
-            $stmt = $this->pdo->prepare("UPDATE users SET username = :new_username WHERE username = :current_username");
+            $stmt = $this->pdo->prepare("UPDATE users SET username = :new_username WHERE id = :user_id");
             $stmt->execute([
                 ':new_username' => $newUsername,
-                ':current_username' => $currentUsername
+                ':user_id' => $_SESSION['user_id']
             ]);
 
-            return ['success' => true, 'message' => 'ユーザー名を変更しました。新しいユーザー名: ' . $newUsername];
+            $_SESSION['username'] = $newUsername;
+
+            return [
+                'success' => true, 
+                'message' => 'ユーザー名を変更しました。新しいユーザー名: ' . htmlspecialchars($newUsername, ENT_QUOTES, 'UTF-8'),
+                'prompt' => $this->getPrompt()
+            ];
 
         } catch (PDOException $e) {
             return ['success' => false, 'message' => 'データベースエラー: ' . $e->getMessage()];
