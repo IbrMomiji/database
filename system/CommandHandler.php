@@ -25,6 +25,7 @@ class CommandHandler
         $argString = $parts[1] ?? '';
         
         if ($commandName === '') {
+            $_SESSION['interaction_state'] = $this->interactionState;
             return ['output' => '', 'prompt' => $this->auth->getPrompt(), 'clear' => false];
         }
 
@@ -43,7 +44,9 @@ class CommandHandler
         $response = $commandInstance->execute($args, $this->auth, $this->interactionState);
         
         $_SESSION['interaction_state'] = $this->interactionState;
-        $response['prompt'] = $this->auth->getPrompt();
+        if (!isset($response['prompt'])) {
+            $response['prompt'] = $this->auth->getPrompt();
+        }
         return $response;
     }
 
@@ -57,6 +60,8 @@ class CommandHandler
         if (isset($postData['consent'])) {
             $args['consent'] = $postData['consent'];
         }
+
+        $response = [];
 
         if ($interactionType) {
             $commandInstance = $this->findCommand($interactionType, $currentMode);
@@ -76,32 +81,42 @@ class CommandHandler
         }
         
         $_SESSION['interaction_state'] = $this->interactionState;
-        $response['prompt'] = $this->auth->getPrompt();
+        if (!isset($response['prompt'])) {
+            $response['prompt'] = $this->auth->getPrompt();
+        }
         return $response;
     }
     
     private function findCommand(string $commandName, string $mode): ?ICommand
     {
         $className = ucfirst($commandName) . 'Command';
-        
-        if (!class_exists($className, true)) {
-            return null;
-        }
+        $fileName = $className . '.php';
+        $baseDir = __DIR__ . '/commands';
 
-        $instance = new $className();
-        
-        $guest_file = __DIR__ . '/commands/guest/' . $className . '.php';
-        $login_file = __DIR__ . '/commands/login/' . $className . '.php';
-        $account_file = __DIR__ . '/commands/login/account/' . $className . '.php';
+        $searchPaths = [];
 
         if ($mode === 'account') {
-            if (file_exists($account_file)) return $instance;
-            if ($commandName === 'help' && file_exists($guest_file)) return $instance;
-            return null;
+            $searchPaths[] = $baseDir . '/login/account/';
         }
         
-        if (file_exists($guest_file)) return $instance;
-        if ($this->auth->isLoggedIn() && file_exists($login_file)) return $instance;
+        if ($this->auth->isLoggedIn()) {
+            $searchPaths[] = $baseDir . '/login/';
+        }
+        
+        $searchPaths[] = $baseDir . '/guest/';
+
+        foreach ($searchPaths as $path) {
+            $filePath = $path . $fileName;
+            if (file_exists($filePath)) {
+                require_once $filePath;
+                if (class_exists($className)) {
+                    $instance = new $className();
+                    if ($instance instanceof ICommand) {
+                        return $instance;
+                    }
+                }
+            }
+        }
 
         return null;
     }
@@ -122,6 +137,9 @@ class CommandHandler
     }
 
     private function checkInvalidArgs(array $args, array $validArgs): bool {
+        if (empty($validArgs) && !empty($args)) {
+            return false;
+        }
         foreach (array_keys($args) as $arg) {
             if (!in_array($arg, $validArgs)) {
                 return false;

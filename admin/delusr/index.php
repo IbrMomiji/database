@@ -4,7 +4,7 @@ if (!defined('DB_PATH')) {
     define('DB_PATH', BASE_PATH . '/db/database.sqlite');
 }
 if (!defined('USER_DIR_PATH')) {
-    define('USER_DIR_PATH', BASE_PATH . '/users'); // パスを 'user' に修正
+    define('USER_DIR_PATH', BASE_PATH . '/users');
 }
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -14,7 +14,7 @@ if (session_status() === PHP_SESSION_NONE) {
 
 require_once BASE_PATH . '/system/Database.php';
 
-// 管理者（root）チェック
+
 if (!isset($_SESSION['username']) || $_SESSION['username'] !== 'root') {
     die('アクセス権がありません。このページは管理者(root)専用です。');
 }
@@ -25,7 +25,7 @@ $pdo = $db->getConnection();
 $message = '';
 $success = false;
 
-// ユーザー削除処理
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_delete']) && !empty($_POST['username'])) {
     $target_user = $_POST['username'];
     if ($target_user === 'root') {
@@ -33,11 +33,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_delete']) && 
     } else {
         $pdo->beginTransaction();
         try {
-            // DBからユーザーを削除
+           
             $stmt = $pdo->prepare("DELETE FROM users WHERE username = ?");
             $stmt->execute([$target_user]);
 
-            // ユーザーディレクトリを再帰的に削除
+           
             $userdir = USER_DIR_PATH . '/' . $target_user;
             if (file_exists($userdir) && is_dir($userdir)) {
                 deleteDirectoryRecursively($userdir);
@@ -53,11 +53,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_delete']) && 
     }
 }
 
-// ユーザー一覧取得（root以外）
+
 $stmt = $pdo->query("SELECT username FROM users WHERE username != 'root' ORDER BY username ASC");
 $usernames = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
-// 再帰ディレクトリ削除関数
+
 function deleteDirectoryRecursively($dir) {
     $files = array_diff(scandir($dir), ['.', '..']);
     foreach ($files as $file) {
@@ -174,7 +174,7 @@ function deleteDirectoryRecursively($dir) {
         .message-info { border-color: #FFFF55; color: #FFFF55; }
         a { color: inherit; text-decoration: none; }
         
-        /* 確認モーダル */
+        
         .modal-overlay {
             position: fixed;
             top: 0;

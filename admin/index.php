@@ -46,10 +46,10 @@ function process_admin_login(Auth $auth) {
 $login_error = process_admin_login($auth);
 
 if ($auth->isLoggedIn() && ($_SESSION['username'] ?? '') === 'root') {
-    // rootとしてログインしている場合は管理ページを表示
+   
     require_once BASE_PATH . '/admin/management.php';
 } else {
-    // それ以外の場合はログインページを表示
+   
     $is_logged_in_as_other_user = $auth->isLoggedIn();
     display_login_page($login_error, $is_logged_in_as_other_user);
 }
@@ -65,7 +65,7 @@ function display_login_page(?string $error, bool $is_other_user) {
         <title>管理者ページ - セキュリティ</title>
         <style>
             body {
-                background-color: #0000AA; /* BIOSの青 */
+                background-color: #0000AA; 
                 color: #FFFFFF;
                 font-family: 'MS Gothic', 'Osaka-mono', 'Courier New', monospace;
                 display: flex;
@@ -75,11 +75,11 @@ function display_login_page(?string $error, bool $is_other_user) {
                 margin: 0;
                 padding: 1rem;
                 box-sizing: border-box;
-                font-size: 16px; /* クラシックなターミナルのフォントサイズ */
+                font-size: 16px; 
             }
             .bios-screen {
                 width: 100%;
-                max-width: 800px; /* 古いモニターのように幅を広げる */
+                max-width: 800px; 
                 background: #0000AA;
                 border: 2px solid #FFFFFF;
                 padding: 0.5rem;

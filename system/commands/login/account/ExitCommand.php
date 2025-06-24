@@ -1,12 +1,9 @@
 <?php
-// system/commands/login/account/ExitCommand.php
-
 class ExitCommand implements ICommand
 {
     public function execute(array $args, Auth $auth, &$interactionState): array
     {
-        // アカウントモードを終了し、通常の対話状態に戻す
-        $interactionState = null; 
+        $interactionState = null;
         return ['output' => "アカウント管理モードを終了しました。", 'clear' => false];
     }
 
