@@ -1,14 +1,10 @@
 class ContextMenu {
     constructor() {
-        this.container = null; // メニューを描画するコンテナ要素
-        this.menuEl = null;    // 現在表示中のメニュー要素
-        this.targetWindow = null; // メニューが表示されている対象のウィンドウ
+        this.container = null;
+        this.menuEl = null;
+        this.targetWindow = null;
     }
 
-    /**
-     * 初期化メソッド
-     * @param {HTMLElement} container - メニューを配置するコンテナ
-     */
     initialize(container) {
         this.container = container;
         
@@ -25,19 +21,30 @@ class ContextMenu {
         });
     }
     
-    /**
-     * メニューを表示する
-     * @param {number} x - 表示するx座標
-     * @param {number} y - 表示するy座標
-     * @param {Array<object>} items - メニュー項目の配列
-     * @param {object} targetWindow - メニューの対象となるウィンドウインスタンス
-     */
     show(x, y, items, targetWindow) {
         this.hide();
 
         this.targetWindow = targetWindow;
         this.menuEl = document.createElement('div');
         this.menuEl.className = 'custom-context-menu';
+
+        if (targetWindow && targetWindow.el) {
+            const titleBar = targetWindow.el.querySelector('.title-bar');
+            if (titleBar) {
+                const bgColor = window.getComputedStyle(titleBar).backgroundColor;
+                
+                const getBrightness = (rgbColor) => {
+                    const rgb = rgbColor.match(/\d+/g).map(Number);
+                    return (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000;
+                };
+
+                const brightness = getBrightness(bgColor);
+                
+                if (brightness > 128) {
+                    this.menuEl.classList.add('light');
+                }
+            }
+        }
 
         items.forEach(item => {
             if (item.type === 'separator') {
@@ -81,18 +88,10 @@ class ContextMenu {
         }
     }
 
-    /**
-     * メニューが表示されているか
-     * @returns {boolean}
-     */
     isVisible() {
         return !!this.menuEl;
     }
 
-    /**
-     * メニュー表示中のキープレスを処理する
-     * @param {KeyboardEvent} e
-     */
     handleKeyPress(e) {
         if (!this.isVisible()) return;
 

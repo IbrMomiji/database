@@ -513,3 +513,17 @@ body {
     background: #FFFFFF;
     color: #0000AA;
 }
+
+.custom-context-menu.light {
+    background: var(--titlebar-light);
+    color: var(--text-light);
+    border-color: #A0A0A0;
+}
+
+.custom-context-menu.light .menu-item:hover {
+      background-color: #e0e0e0;
+}
+
+.custom-context-menu.light .separator {
+    background-color: #cccccc;
+}
