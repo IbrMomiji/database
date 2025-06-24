@@ -145,15 +145,31 @@ class Auth
         }
     }
 
-    public function renameUser($newUsername)
+    public function renameUser($newUsername, $password)
     {
         if (!isset($_SESSION['user_id'])) {
             return ['success' => false, 'message' => "エラー: ログインしていません。"];
+        }
+
+        try {
+            $stmt = $this->pdo->prepare("SELECT password FROM users WHERE id = :user_id");
+            $stmt->execute([':user_id' => $_SESSION['user_id']]);
+            $user = $stmt->fetch();
+
+            if (!$user || !password_verify($password, $user['password'])) {
+                return ['success' => false, 'message' => 'エラー: パスワードが間違っています。'];
+            }
+        } catch (PDOException $e) {
+            return ['success' => false, 'message' => 'データベースエラー: ' . $e->getMessage()];
         }
         
         $usernameValidation = $this->validateUsername($newUsername);
         if ($usernameValidation !== true) {
             return ['success' => false, 'message' => $usernameValidation];
+        }
+
+        if (strtolower($newUsername) === strtolower($_SESSION['username'])) {
+            return ['success' => false, 'message' => 'エラー: 新しいユーザー名が現在のユーザー名と同じです。'];
         }
 
         try {
