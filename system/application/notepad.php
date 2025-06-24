@@ -1003,6 +1003,37 @@ if (isset($_GET['action'])) {
                 updateZoomStatus();
             }
         });
+        const myWindowIdForMessaging = window.name;
+
+        document.addEventListener('mousedown', () => {
+            window.parent.postMessage({
+                type: 'iframeClick',
+                windowId: myWindowIdForMessaging
+            }, '*');
+        }, true);
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.altKey && e.key.toLowerCase() === 'w') || (e.altKey && ['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key))) {
+                e.preventDefault();
+                window.parent.postMessage({
+                    type: 'forwardedKeydown',
+                    key: e.key,
+                    altKey: e.altKey,
+                    ctrlKey: e.ctrlKey,
+                    shiftKey: e.shiftKey,
+                    metaKey: e.metaKey,
+                    windowId: myWindowIdForMessaging
+                }, '*');
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'Alt') {
+                e.preventDefault();
+                window.parent.postMessage({ type: 'forwardedKeyup', key: e.key }, '*');
+            }
+        });
+
         const initializeApp = async () => {
             await loadSettings();
             const fileToOpenOnInit = <?php echo json_encode($fileToOpen); ?>;
@@ -1020,5 +1051,3 @@ if (isset($_GET['action'])) {
     </script>
 </body>
 </html>
-
-}

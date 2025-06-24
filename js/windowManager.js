@@ -80,9 +80,12 @@ class WindowManager {
     }
 
     focus(id) {
-        this.bringToFront(id);
         const win = this.windows.get(id);
         if (!win) return;
+        this.bringToFront(id);
+        
+        document.querySelectorAll('.window-container.active').forEach(w => w.classList.remove('active'));
+        win.el.classList.add('active');
 
         if (win.controller && typeof win.controller.focus === 'function') {
             win.controller.focus();
@@ -94,46 +97,21 @@ class WindowManager {
         }
     }
 
-    async _handleShareFormSubmit(event) {
-        const { action, formData } = event.data;
-        const apiFormData = new FormData();
-        apiFormData.append('action', action);
-        for (const key in formData) {
-            apiFormData.append(key, formData[key]);
-        }
-
-        let result;
-        try {
-            const response = await fetch('share_api.php', { method: 'POST', body: apiFormData });
-            result = await response.json();
-        } catch (error) {
-            result = { success: false, message: '通信エラー: ' + error.message };
-        }
-
-        for (const [id, win] of this.windows.entries()) {
-            const iframe = win.el.querySelector('iframe');
-            if (iframe && iframe.contentWindow === event.source) {
-                iframe.contentWindow.postMessage({
-                    type: 'shareFormResult',
-                    action: action,
-                    result: result
-                }, '*');
-                break;
-            }
-        }
-    }
-
     _setupMessageListener() {
         window.addEventListener('message', (event) => {
             if (typeof event.data !== 'object' || event.data === null) return;
-            const { type } = event.data;
-            try {
-                if (type === 'submitShareForm') {
-                    this._handleShareFormSubmit(event);
-                    return;
-                }
+            const { type, windowId, sourceWindowId, mode, currentPath, filePath, app, title, itemPath } = event.data;
 
-                const { sourceWindowId, mode, currentPath, filePath, app, windowId, title, itemPath } = event.data;
+            try {
+                if (type === 'iframeClick' && windowId) {
+                    for (const [id, win] of this.windows.entries()) {
+                         if(win.el.querySelector('iframe')?.name === windowId){
+                             this.focus(id);
+                             break;
+                         }
+                    }
+                    return; 
+                }
 
                 if (type === 'openWithApp') {
                     this.createWindow(app, { filePath: filePath });
@@ -261,7 +239,7 @@ class WindowManager {
         if (!winData || winData.state !== 'minimized') return;
 
         winData.state = 'normal';
-        winData.el.style.display = '';
+        winData.el.style.display = 'flex';
         this.zOrder.push(id);
 
         if (tab) {
@@ -276,48 +254,68 @@ class WindowManager {
         if (!winData) return;
         const win = winData.el;
         const maximizeBtn = win.querySelector('.maximize-btn');
+        win.style.transition = 'none';
 
-        if (winData.state === 'maximized' || winData.state.startsWith('snapped')) {
+        if (winData.state === 'maximized') {
             const pos = winData.prevRect || {};
-            win.classList.remove('maximized', 'snapped-left', 'snapped-right');
+            win.classList.remove('maximized');
             win.style.top = pos.top || '50px';
             win.style.left = pos.left || '50px';
             win.style.width = pos.width || '700px';
             win.style.height = pos.height || '450px';
-            if(maximizeBtn) maximizeBtn.innerHTML = '&#10065;';
+            if (maximizeBtn) maximizeBtn.innerHTML = '&#10065;';
             winData.state = 'normal';
         } else {
-            winData.prevRect = { top: win.style.top, left: win.style.left, width: win.style.width, height: win.style.height };
+            if (winData.state === 'normal') {
+                winData.prevRect = {
+                    top: `${win.offsetTop}px`,
+                    left: `${win.offsetLeft}px`,
+                    width: `${win.offsetWidth}px`,
+                    height: `${win.offsetHeight}px`
+                };
+            }
+            win.classList.remove('snapped-left', 'snapped-right');
             win.classList.add('maximized');
-            if(maximizeBtn) maximizeBtn.innerHTML = '&#10066;';
+            if (maximizeBtn) maximizeBtn.innerHTML = '&#10066;';
             winData.state = 'maximized';
         }
+        this.focus(id);
     }
 
     snapWindow(id, type) {
         const winData = this.windows.get(id);
         if (!winData) return;
         const win = winData.el;
+        const maximizeBtn = win.querySelector('.maximize-btn');
+        const newSnapState = `snapped-${type}`;
+        win.style.transition = 'none';
 
-        if (winData.state === 'normal') {
-            winData.prevRect = {
-                top: win.style.top, left: win.style.left,
-                width: win.style.width, height: win.style.height
-            };
-        }
-
-        win.classList.remove('maximized', 'snapped-left', 'snapped-right');
-
-        if (type === 'top') {
-            this.toggleMaximize(id);
+        if (winData.state === newSnapState) {
+            const pos = winData.prevRect || {};
+            win.classList.remove('snapped-left', 'snapped-right');
+            win.style.top = pos.top || '50px';
+            win.style.left = pos.left || '50px';
+            win.style.width = pos.width || '700px';
+            win.style.height = pos.height || '450px';
+            if (maximizeBtn) maximizeBtn.innerHTML = '&#10065;';
+            winData.state = 'normal';
         } else {
-            win.classList.add(type === 'left' ? 'snapped-left' : 'snapped-right');
-            winData.state = `snapped-${type}`;
-            const maximizeBtn = win.querySelector('.maximize-btn');
-            if(maximizeBtn) maximizeBtn.innerHTML = '&#10065;';
+            if (winData.state === 'normal') {
+                winData.prevRect = {
+                    top: `${win.offsetTop}px`,
+                    left: `${win.offsetLeft}px`,
+                    width: `${win.offsetWidth}px`,
+                    height: `${win.offsetHeight}px`
+                };
+            }
+            win.classList.remove('maximized', 'snapped-left', 'snapped-right');
+            win.classList.add(newSnapState);
+            if (maximizeBtn) maximizeBtn.innerHTML = '&#10065;';
+            winData.state = newSnapState;
         }
+        this.focus(id);
     }
-
+    
     bringToFront(id) {
         const win = this.windows.get(id);
         if (!win) return;
@@ -328,12 +326,8 @@ class WindowManager {
     }
 
     _showTitleBarContextMenu(e, winInstance, coords) {
-        if (e && typeof e.preventDefault === 'function') {
-            e.preventDefault();
-        }
-        if (e && typeof e.stopPropagation === 'function') {
-            e.stopPropagation();
-        }
+        if (e && typeof e.preventDefault === 'function') e.preventDefault();
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
 
         const { id, el } = winInstance;
         const winData = this.windows.get(id);
@@ -375,10 +369,9 @@ class WindowManager {
         let dragOffsetX, dragOffsetY;
 
         if (winInstance.state === 'maximized' || winInstance.state.startsWith('snapped')) {
-            const prevWidth = parseFloat(winInstance.prevRect?.width) || 700;
+            const prevWidth = parseFloat((winInstance.prevRect?.width || '700px').replace('px', ''));
             const newLeft = e.clientX - (prevWidth * (e.clientX / window.innerWidth));
             this.toggleMaximize(winInstance.id);
-
             winInstance.el.style.left = `${newLeft}px`;
             winInstance.el.style.top = `${e.clientY - 15}px`;
             dragOffsetX = e.clientX - newLeft;
@@ -441,7 +434,6 @@ class WindowManager {
             }
 
             this.focus(this.activeDrag.winInstance.id);
-
             this.activeDrag = null;
         };
 
@@ -490,11 +482,11 @@ class WindowManager {
         const minW = parseInt(getComputedStyle(winInstance.el).minWidth) || 200;
         const minH = parseInt(getComputedStyle(winInstance.el).minHeight) || 150;
 
-        if(width > minW) {
+        if(width >= minW) {
             winInstance.el.style.width = width + 'px';
             winInstance.el.style.left = left + 'px';
         }
-        if(height > minH) {
+        if(height >= minH) {
             winInstance.el.style.height = height + 'px';
             winInstance.el.style.top = top + 'px';
         }
@@ -502,10 +494,11 @@ class WindowManager {
 
     _showSnapIndicator(type) {
         const { innerWidth: w, innerHeight: h } = window;
+        const taskbarHeight = 30;
         this.snapIndicator.style.display = 'block';
-        if (type === "left") Object.assign(this.snapIndicator.style, { left: '0px', top: '0px', width: w / 2 + 'px', height: h + 'px' });
-        else if (type === "right") Object.assign(this.snapIndicator.style, { left: w / 2 + 'px', top: '0px', width: w / 2 + 'px', height: h + 'px' });
-        else if (type === "top") Object.assign(this.snapIndicator.style, { left: '0px', top: '0px', width: w + 'px', height: h + 'px' });
+        if (type === "left") Object.assign(this.snapIndicator.style, { left: '0px', top: '0px', width: w / 2 + 'px', height: h - taskbarHeight + 'px' });
+        else if (type === "right") Object.assign(this.snapIndicator.style, { left: w / 2 + 'px', top: '0px', width: w / 2 + 'px', height: h - taskbarHeight + 'px' });
+        else if (type === "top") Object.assign(this.snapIndicator.style, { left: '0px', top: '0px', width: w + 'px', height: h - taskbarHeight + 'px' });
     }
 
     _hideSnapIndicator() {

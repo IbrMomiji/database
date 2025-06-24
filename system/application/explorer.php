@@ -25,7 +25,6 @@ try {
     }
     $username = $user['username'];
     $user_uuid = $user['uuid'];
-
 } catch (Exception $e) {
     http_response_code(500);
     header('Content-Type: application/json; charset=utf-8');
@@ -48,7 +47,8 @@ if (!is_dir($settings_path)) {
     mkdir($settings_path, 0775, true);
 }
 
-function getSafePath($baseDir, $path) {
+function getSafePath($baseDir, $path)
+{
     $path = str_replace('\\', '/', $path);
     $path = '/' . trim($path, '/');
     $parts = explode('/', $path);
@@ -59,7 +59,7 @@ function getSafePath($baseDir, $path) {
             if (!empty($safeParts)) array_pop($safeParts);
         } else {
             $part = preg_replace('/[\\\\\/:\*\?"<>|]/', '', $part);
-            if($part !== '') $safeParts[] = $part;
+            if ($part !== '') $safeParts[] = $part;
         }
     }
     $finalPath = $baseDir . DIRECTORY_SEPARATOR . implode(DIRECTORY_SEPARATOR, $safeParts);
@@ -79,7 +79,8 @@ function getSafePath($baseDir, $path) {
     }
 }
 
-function getDirectorySize($dir) {
+function getDirectorySize($dir)
+{
     if (!is_dir($dir) || !is_readable($dir)) return 0;
     $size = 0;
     try {
@@ -101,7 +102,8 @@ function getDirectorySize($dir) {
     return $size;
 }
 
-function formatBytes($bytes) {
+function formatBytes($bytes)
+{
     if ($bytes <= 0) return '0 Bytes';
     $units = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
@@ -110,20 +112,27 @@ function formatBytes($bytes) {
     return round($bytes, 2) . ' ' . $units[$pow];
 }
 
-function getFileType($filePath) {
+function getFileType($filePath)
+{
     if (is_dir($filePath)) return 'ファイル フォルダー';
     $ext = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-    $types = [ 'txt' => 'テキスト ドキュメント', 'pdf' => 'PDF ドキュメント', 'jpg' => 'JPEG 画像', 'jpeg' => 'JPEG 画像', 'png' => 'PNG 画像', 'gif' => 'GIF 画像', 'svg' => 'SVG 画像', 'zip' => '圧縮 (zip) フォルダー', 'rar' => 'WinRAR 書庫', 'doc' => 'Microsoft Word 文書', 'docx' => 'Microsoft Word 文書', 'xls' => 'Microsoft Excel ワークシート', 'xlsx' => 'Microsoft Excel ワークシート', 'ppt' => 'Microsoft PowerPoint プレゼンテーション', 'pptx' => 'Microsoft PowerPoint プレゼンテーション', 'php' => 'PHP ファイル', 'html' => 'HTML ドキュメント', 'css' => 'CSS スタイルシート', 'js' => 'JavaScript ファイル', ];
+    $types = ['txt' => 'テキスト ドキュメント', 'pdf' => 'PDF ドキュメント', 'jpg' => 'JPEG 画像', 'jpeg' => 'JPEG 画像', 'png' => 'PNG 画像', 'gif' => 'GIF 画像', 'svg' => 'SVG 画像', 'zip' => '圧縮 (zip) フォルダー', 'rar' => 'WinRAR 書庫', 'doc' => 'Microsoft Word 文書', 'docx' => 'Microsoft Word 文書', 'xls' => 'Microsoft Excel ワークシート', 'xlsx' => 'Microsoft Excel ワークシート', 'ppt' => 'Microsoft PowerPoint プレゼンテーション', 'pptx' => 'Microsoft PowerPoint プレゼンテーション', 'php' => 'PHP ファイル', 'html' => 'HTML ドキュメント', 'css' => 'CSS スタイルシート', 'js' => 'JavaScript ファイル',];
     return $types[$ext] ?? strtoupper($ext) . ' ファイル';
 }
 
-function deleteDirectoryRecursively($dir) {
+function deleteDirectoryRecursively($dir)
+{
     if (!is_dir($dir)) return false;
     $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
     foreach ($files as $fileinfo) {
         $path = $fileinfo->getRealPath();
-        if ($fileinfo->isDir()) { @chmod($path, 0777); @rmdir($path); }
-        else { @chmod($path, 0777); @unlink($path); }
+        if ($fileinfo->isDir()) {
+            @chmod($path, 0777);
+            @rmdir($path);
+        } else {
+            @chmod($path, 0777);
+            @unlink($path);
+        }
     }
     return @rmdir($dir);
 }
@@ -135,10 +144,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     try {
         if (!in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites'])) {
-             $safe_path = getSafePath($user_dir, $path);
-             if ($safe_path === false) {
-                 throw new Exception('無効なパスです。');
-             }
+            $safe_path = getSafePath($user_dir, $path);
+            if ($safe_path === false) {
+                throw new Exception('無効なパスです。');
+            }
         }
 
         switch ($action) {
@@ -167,7 +176,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'is_system' => $is_system
                     ];
                 }
-                usort($files, function($a, $b) {
+                usort($files, function ($a, $b) {
                     if ($a['is_dir'] !== $b['is_dir']) return $b['is_dir'] <=> $a['is_dir'];
                     return strcasecmp($a['name'], $b['name']);
                 });
@@ -227,7 +236,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'search':
-                $query = $_POST['query'] ?? ''; if (empty($query)) throw new Exception('検索クエリがありません。');
+                $query = $_POST['query'] ?? '';
+                if (empty($query)) throw new Exception('検索クエリがありません。');
                 $results = [];
                 $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($user_dir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
                 foreach ($iterator as $file) {
@@ -236,7 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $item_path = $file->getRealPath();
                         $relative_path = str_replace(realpath($user_dir), '', $item_path);
                         $is_dir = $file->isDir();
-                        $results[] = [ 'name' => $file->getFilename(), 'path' => str_replace('\\', '/', $relative_path), 'is_dir' => $is_dir, 'type' => getFileType($item_path), 'size' => $is_dir ? '' : formatBytes($file->getSize()), 'modified' => date('Y/m/d H:i', $file->getMTime()) ];
+                        $results[] = ['name' => $file->getFilename(), 'path' => str_replace('\\', '/', $relative_path), 'is_dir' => $is_dir, 'type' => getFileType($item_path), 'size' => $is_dir ? '' : formatBytes($file->getSize()), 'modified' => date('Y/m/d H:i', $file->getMTime())];
                     }
                 }
                 echo json_encode(['success' => true, 'files' => $results]);
@@ -249,11 +259,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             case 'upload':
                 if (empty($_FILES['files']['name'][0])) throw new Exception('アップロードされたファイルがありません。');
-                $total_size = array_sum($_FILES['files']['size']); if (getDirectorySize($user_dir) + $total_size > MAX_STORAGE_BYTES) throw new Exception('ストレージ容量不足です。');
+                $total_size = array_sum($_FILES['files']['size']);
+                if (getDirectorySize($user_dir) + $total_size > MAX_STORAGE_BYTES) throw new Exception('ストレージ容量不足です。');
                 $relative_paths = isset($_POST['relative_paths']) ? json_decode($_POST['relative_paths'], true) : [];
                 foreach ($_FILES['files']['tmp_name'] as $index => $tmp_name) {
                     $file_name = count($relative_paths) > 0 ? $relative_paths[$index] : $_FILES['files']['name'][$index];
-                    $target_path = $safe_path . DIRECTORY_SEPARATOR . $file_name; $dir_path = dirname($target_path);
+                    $target_path = $safe_path . DIRECTORY_SEPARATOR . $file_name;
+                    $dir_path = dirname($target_path);
                     if (!is_dir($dir_path)) mkdir($dir_path, 0777, true);
                     if (!move_uploaded_file($tmp_name, $target_path)) throw new Exception("{$file_name} のアップロードに失敗しました。");
                 }
@@ -261,8 +273,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'create_folder':
-                $folder_name = $_POST['name'] ?? ''; if (empty($folder_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $folder_name)) throw new Exception('無効なフォルダ名です。');
-                $new_folder_path = $safe_path . DIRECTORY_SEPARATOR . $folder_name; if (file_exists($new_folder_path)) throw new Exception('同じ名前のアイテムが存在します。');
+                $folder_name = $_POST['name'] ?? '';
+                if (empty($folder_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $folder_name)) throw new Exception('無効なフォルダ名です。');
+                $new_folder_path = $safe_path . DIRECTORY_SEPARATOR . $folder_name;
+                if (file_exists($new_folder_path)) throw new Exception('同じ名前のアイテムが存在します。');
                 if (!mkdir($new_folder_path, 0777, true)) throw new Exception('フォルダの作成に失敗しました。');
                 echo json_encode(['success' => true, 'message' => 'フォルダを作成しました。']);
                 break;
@@ -277,10 +291,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'rename':
-                $old_name_path = $_POST['item_path'] ?? ''; $new_name = $_POST['new_name'] ?? '';
+                $old_name_path = $_POST['item_path'] ?? '';
+                $new_name = $_POST['new_name'] ?? '';
                 if (empty($old_name_path) || empty($new_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $new_name)) throw new Exception('無効なファイル名です。');
                 $old_path = getSafePath($user_dir, $old_name_path);
-                if(basename($old_path) === SETTINGS_DIR) throw new Exception('システムフォルダの名前は変更できません。');
+                if (basename($old_path) === SETTINGS_DIR) throw new Exception('システムフォルダの名前は変更できません。');
                 $new_path = dirname($old_path) . DIRECTORY_SEPARATOR . $new_name;
                 if ($old_path === false) throw new Exception('無効なパスです。');
                 if (!file_exists($old_path)) throw new Exception('元のファイルが見つかりません。');
@@ -290,10 +305,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 break;
 
             case 'delete':
-                $items = json_decode($_POST['items'] ?? '[]', true); if (empty($items)) throw new Exception('削除するアイテムが指定されていません。');
+                $items = json_decode($_POST['items'] ?? '[]', true);
+                if (empty($items)) throw new Exception('削除するアイテムが指定されていません。');
                 foreach ($items as $item) {
                     $item_path_full = getSafePath($user_dir, $item['path']);
-                    if(basename($item_path_full) === SETTINGS_DIR) continue;
+                    if (basename($item_path_full) === SETTINGS_DIR) continue;
                     if (!$item_path_full || !file_exists($item_path_full)) continue;
                     if (is_dir($item_path_full)) {
                         if (!deleteDirectoryRecursively($item_path_full)) throw new Exception("ディレクトリ '{$item['name']}' の削除に失敗しました。");
@@ -324,7 +340,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode(['success' => true, 'message' => 'お気に入りを保存しました。']);
                 break;
         }
-    } catch (Exception $e) { http_response_code(500); echo json_encode(['success' => false, 'message' => $e->getMessage()]); }
+    } catch (Exception $e) {
+        http_response_code(500);
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
     exit;
 }
 
@@ -347,6 +366,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
 ?>
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -365,100 +385,610 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             --text-secondary-color: #c5c5c5;
             --accent-color: #4cc2ff;
         }
-        html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: var(--font-family); font-size: 14px; background: var(--bg-color); color: var(--text-color); }
-        ::-webkit-scrollbar { width: 12px; }
-        ::-webkit-scrollbar-track { background: var(--bg-color); }
-        ::-webkit-scrollbar-thumb { background-color: #555; border-radius: 10px; border: 3px solid var(--bg-color); }
-        ::-webkit-scrollbar-thumb:hover { background-color: #777; }
-        .explorer-container { display: flex; flex-direction: column; height: 100%; position: relative; }
-        .header { background: var(--bg-header); border-bottom: 1px solid var(--border-color); }
-        .header-tabs { display: flex; padding: 0 12px; position: relative; }
-        .tab-item { padding: 10px 16px; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
-        .tab-item.active { border-bottom-color: var(--accent-color); font-weight: 500; }
-        .tab-item:not(.active):hover { background: var(--bg-hover); }
-        .toolbar { display: none; align-items: stretch; gap: 1px; padding: 8px 12px; background: #202020; border-bottom: 1px solid var(--border-color); }
-        .toolbar.active { display: flex; }
-        .ribbon-group { display: flex; flex-direction: column; align-items: center; padding: 0 12px; }
-        .ribbon-buttons { display: flex; align-items: flex-start; height: 100%; gap: 2px; }
-        .ribbon-group .group-label { font-size: 12px; color: var(--text-secondary-color); margin-top: 4px; }
-        .toolbar button { background: none; border: 1px solid transparent; color: var(--text-color); padding: 4px; border-radius: 4px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; width: auto; min-width: 70px; height: 60px; font-family: var(--font-family); }
-        .toolbar button.toggle-btn.active { background: var(--bg-selection); }
-        .toolbar button:hover { background: var(--bg-hover); }
-        .toolbar button:disabled { cursor: not-allowed; opacity: 0.4; }
-        .toolbar .icon { width: 24px; height: 24px; }
-        .toolbar .label { font-size: 12px; white-space: nowrap; }
-        .ribbon-separator { width: 1px; background: var(--border-color); }
-        .address-bar-container { display: flex; padding: 8px 12px; align-items: center; gap: 8px; }
-        .address-bar-nav { display: flex; flex-direction: row; }
-        .address-bar-nav button { background: none; border: 1px solid transparent; color: var(--text-color); padding: 6px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; }
-        .address-bar-nav button:not(:disabled):hover { background: var(--bg-hover); }
-        .address-bar-nav button:disabled { opacity: 0.4; cursor: not-allowed; }
-        .address-bar-nav .icon { width: 16px; height: 16px; }
-        .address-bar { flex-grow: 1; display: flex; align-items: center; background: var(--bg-tertiary-color); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 4px; }
-        .address-bar-part { padding: 4px 8px; cursor: pointer; border-radius: 4px; white-space: nowrap; color: var(--text-secondary-color); }
-        .address-bar-part:hover { background: var(--bg-hover); }
-        .address-bar-separator { color: var(--text-secondary-color); padding: 0 4px; }
-        .address-input { flex-grow: 1; background: var(--bg-tertiary-color); border: 1px solid var(--accent-color); color: var(--text-color); padding: 6px 10px; outline: none; border-radius: 4px; }
-        .search-box { background: var(--bg-tertiary-color); border: 1px solid var(--border-color); color: var(--text-color); border-radius: 4px; padding: 6px 10px; width: 200px; }
-        .search-box:focus { border-color: var(--accent-color); }
-        .main-content { flex: 1; display: flex; overflow: hidden; }
-        .nav-pane { width: 240px; background: var(--bg-color); border-right: 1px solid var(--border-color); padding: 8px; overflow-y: auto; user-select: none; }
-        .nav-group-header { padding: 10px 4px 4px; font-size: 12px; color: var(--text-secondary-color); font-weight: bold; }
-        .nav-item { padding: 6px 10px; border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 8px; }
-        .nav-item:hover { background: var(--bg-hover); }
-        .nav-item.selected { background: var(--bg-hover); }
-        .nav-item.active { background: var(--bg-selection); }
-        .nav-item .icon { width: 20px; height: 20px; flex-shrink: 0; }
-        .nav-item.nested { padding-left: 28px; }
-        .content-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; user-select: none; position: relative; }
-        .file-grid-view { display: none; flex-wrap: wrap; align-content: flex-start; gap: 16px; padding: 16px; overflow-y: auto; }
-        .grid-item { display: flex; flex-direction: column; align-items: center; width: 100px; padding: 8px; border-radius: 4px; cursor: pointer; }
-        .grid-item:hover { background: var(--bg-hover); }
-        .grid-item.selected { background: var(--bg-selection); }
-        .grid-item .icon { width: 64px; height: 64px; }
-        .grid-item .name { font-size: 12px; text-align: center; margin-top: 8px; word-break: break-all; }
-        .file-table-view { flex: 1; overflow: auto; display: block;}
-        .file-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-        .file-table th { background: rgba(31, 31, 31, 0.8); backdrop-filter: blur(10px); padding: 8px 16px; text-align: left; font-weight: normal; border-bottom: 1px solid var(--border-color); position: sticky; top: 0; color: var(--text-secondary-color); }
-        .file-table td { padding: 8px 16px; border-bottom: 1px solid var(--border-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: default; }
-        .file-item.cut, .grid-item.cut { opacity: 0.5; }
-        .col-check { width: 40px; display: none; }
-        .col-name { width: 50%; }
-        .col-modified { width: 20%; }
-        .col-type { width: 20%; }
-        .col-size { width: 10%; }
-        .explorer-container.show-checkboxes .col-check { display: table-cell; }
-        .file-table tr.search-result .path { font-size: 12px; color: var(--text-secondary-color); }
-        .file-table tr:hover { background: var(--bg-hover); }
-        .file-table tr.selected { background: var(--bg-selection) !important; color: white; }
-        .file-table tr.selected .path { color: #ccc; }
-        .file-table tr.empty-message td { text-align: center; padding: 40px; color: var(--text-secondary-color); }
-        .item-name-container { display: flex; align-items: center; gap: 8px; }
-        .item-name-container input { background: var(--bg-color); color: var(--text-color); border: 1px solid var(--accent-color); padding: 4px; border-radius: 4px; outline: none; flex-grow: 1; }
-        .file-table .icon { width: 20px; height: 20px; flex-shrink: 0; }
-        #preview-pane { display: none; width: 300px; flex-shrink: 0; border-left: 1px solid var(--border-color); padding: 16px; overflow-y: auto; text-align: center; }
-        #preview-pane.active { display: block; }
-        #preview-pane img, #preview-pane video { max-width: 100%; border-radius: 4px; }
-        #preview-placeholder { color: var(--text-secondary-color); }
-        .status-bar { padding: 4px 12px; background: var(--bg-secondary-color); border-top: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
-        .usage-display { display: flex; align-items: center; gap: 8px; }
-        .usage-bar { width: 150px; height: 14px; background: var(--bg-tertiary-color); border-radius: 4px; overflow: hidden; border: 1px solid var(--border-color); }
-        .usage-fill { height: 100%; background: var(--accent-color); width: 0%; transition: width 0.5s ease; }
-        #drag-drop-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); border: 2px dashed var(--accent-color); display: none; justify-content: center; align-items: center; font-size: 24px; color: var(--text-color); z-index: 9999; pointer-events: none; }
-        #drag-drop-overlay.visible { display: flex; }
-        .context-menu { position: fixed; z-index: 1001; background: #2b2b2b; border: 1px solid #454545; min-width: 250px; padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); border-radius: 8px; }
-        .context-menu-item { position: relative; padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; justify-content: space-between; align-items: center; user-select: none; border-radius: 4px; }
-        .context-menu-item.disabled { opacity: 0.5; cursor: default; background: none !important; }
-        .context-menu-item:not(.disabled):hover { background: var(--bg-hover); }
-        .context-menu-item .label { display: flex; align-items: center; gap: 12px; }
-        .context-menu-item .icon { width: 16px; height: 16px; fill: var(--text-color); }
-        .context-menu-item .hint { color: var(--text-secondary-color); font-size: 12px; }
-        .context-menu-separator { height: 1px; background: #454545; margin: 4px; }
-        .context-menu-item.has-submenu::after { content: '▶'; font-size: 10px; }
-        .submenu { display: none; position: absolute; left: 100%; top: -5px; background: #2b2b2b; border: 1px solid #454545; min-width: 180px; padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); border-radius: 8px; z-index: 1002; }
-        #selection-rectangle { position: absolute; border: 1px solid var(--accent-color); background-color: rgba(76, 194, 255, 0.2); pointer-events: none; z-index: 999; }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: var(--font-family);
+            font-size: 14px;
+            background: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        ::-webkit-scrollbar {
+            width: 12px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background-color: #555;
+            border-radius: 10px;
+            border: 3px solid var(--bg-color);
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background-color: #777;
+        }
+
+        .explorer-container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            position: relative;
+        }
+
+        .header {
+            background: var(--bg-header);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header-tabs {
+            display: flex;
+            padding: 0 12px;
+            position: relative;
+        }
+
+        .tab-item {
+            padding: 10px 16px;
+            font-size: 13px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab-item.active {
+            border-bottom-color: var(--accent-color);
+            font-weight: 500;
+        }
+
+        .tab-item:not(.active):hover {
+            background: var(--bg-hover);
+        }
+
+        .toolbar {
+            display: none;
+            align-items: stretch;
+            gap: 1px;
+            padding: 8px 12px;
+            background: #202020;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .toolbar.active {
+            display: flex;
+        }
+
+        .ribbon-group {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0 12px;
+        }
+
+        .ribbon-buttons {
+            display: flex;
+            align-items: flex-start;
+            height: 100%;
+            gap: 2px;
+        }
+
+        .ribbon-group .group-label {
+            font-size: 12px;
+            color: var(--text-secondary-color);
+            margin-top: 4px;
+        }
+
+        .toolbar button {
+            background: none;
+            border: 1px solid transparent;
+            color: var(--text-color);
+            padding: 4px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            width: auto;
+            min-width: 70px;
+            height: 60px;
+            font-family: var(--font-family);
+        }
+
+        .toolbar button.toggle-btn.active {
+            background: var(--bg-selection);
+        }
+
+        .toolbar button:hover {
+            background: var(--bg-hover);
+        }
+
+        .toolbar button:disabled {
+            cursor: not-allowed;
+            opacity: 0.4;
+        }
+
+        .toolbar .icon {
+            width: 24px;
+            height: 24px;
+        }
+
+        .toolbar .label {
+            font-size: 12px;
+            white-space: nowrap;
+        }
+
+        .ribbon-separator {
+            width: 1px;
+            background: var(--border-color);
+        }
+
+        .address-bar-container {
+            display: flex;
+            padding: 8px 12px;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .address-bar-nav {
+            display: flex;
+            flex-direction: row;
+        }
+
+        .address-bar-nav button {
+            background: none;
+            border: 1px solid transparent;
+            color: var(--text-color);
+            padding: 6px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+
+        .address-bar-nav button:not(:disabled):hover {
+            background: var(--bg-hover);
+        }
+
+        .address-bar-nav button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .address-bar-nav .icon {
+            width: 16px;
+            height: 16px;
+        }
+
+        .address-bar {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            background: var(--bg-tertiary-color);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 2px 4px;
+        }
+
+        .address-bar-part {
+            padding: 4px 8px;
+            cursor: pointer;
+            border-radius: 4px;
+            white-space: nowrap;
+            color: var(--text-secondary-color);
+        }
+
+        .address-bar-part:hover {
+            background: var(--bg-hover);
+        }
+
+        .address-bar-separator {
+            color: var(--text-secondary-color);
+            padding: 0 4px;
+        }
+
+        .address-input {
+            flex-grow: 1;
+            background: var(--bg-tertiary-color);
+            border: 1px solid var(--accent-color);
+            color: var(--text-color);
+            padding: 6px 10px;
+            outline: none;
+            border-radius: 4px;
+        }
+
+        .search-box {
+            background: var(--bg-tertiary-color);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            border-radius: 4px;
+            padding: 6px 10px;
+            width: 200px;
+        }
+
+        .search-box:focus {
+            border-color: var(--accent-color);
+        }
+
+        .main-content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .nav-pane {
+            width: 240px;
+            background: var(--bg-color);
+            border-right: 1px solid var(--border-color);
+            padding: 8px;
+            overflow-y: auto;
+            user-select: none;
+        }
+
+        .nav-group-header {
+            padding: 10px 4px 4px;
+            font-size: 12px;
+            color: var(--text-secondary-color);
+            font-weight: bold;
+        }
+
+        .nav-item {
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .nav-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .nav-item.selected {
+            background: var(--bg-hover);
+        }
+
+        .nav-item.active {
+            background: var(--bg-selection);
+        }
+
+        .nav-item .icon {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        .nav-item.nested {
+            padding-left: 28px;
+        }
+
+        .content-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+            position: relative;
+        }
+
+        .file-grid-view {
+            display: none;
+            flex-wrap: wrap;
+            align-content: flex-start;
+            gap: 16px;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .grid-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100px;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .grid-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .grid-item.selected {
+            background: var(--bg-selection);
+        }
+
+        .grid-item .icon {
+            width: 64px;
+            height: 64px;
+        }
+
+        .grid-item .name {
+            font-size: 12px;
+            text-align: center;
+            margin-top: 8px;
+            word-break: break-all;
+        }
+
+        .file-table-view {
+            flex: 1;
+            overflow: auto;
+            display: block;
+        }
+
+        .file-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .file-table th {
+            background: rgba(31, 31, 31, 0.8);
+            backdrop-filter: blur(10px);
+            padding: 8px 16px;
+            text-align: left;
+            font-weight: normal;
+            border-bottom: 1px solid var(--border-color);
+            position: sticky;
+            top: 0;
+            color: var(--text-secondary-color);
+        }
+
+        .file-table td {
+            padding: 8px 16px;
+            border-bottom: 1px solid var(--border-color);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            cursor: default;
+        }
+
+        .file-item.cut,
+        .grid-item.cut {
+            opacity: 0.5;
+        }
+
+        .col-check {
+            width: 40px;
+            display: none;
+        }
+
+        .col-name {
+            width: 50%;
+        }
+
+        .col-modified {
+            width: 20%;
+        }
+
+        .col-type {
+            width: 20%;
+        }
+
+        .col-size {
+            width: 10%;
+        }
+
+        .explorer-container.show-checkboxes .col-check {
+            display: table-cell;
+        }
+
+        .file-table tr.search-result .path {
+            font-size: 12px;
+            color: var(--text-secondary-color);
+        }
+
+        .file-table tr:hover {
+            background: var(--bg-hover);
+        }
+
+        .file-table tr.selected {
+            background: var(--bg-selection) !important;
+            color: white;
+        }
+
+        .file-table tr.selected .path {
+            color: #ccc;
+        }
+
+        .file-table tr.empty-message td {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary-color);
+        }
+
+        .item-name-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .item-name-container input {
+            background: var(--bg-color);
+            color: var(--text-color);
+            border: 1px solid var(--accent-color);
+            padding: 4px;
+            border-radius: 4px;
+            outline: none;
+            flex-grow: 1;
+        }
+
+        .file-table .icon {
+            width: 20px;
+            height: 20px;
+            flex-shrink: 0;
+        }
+
+        #preview-pane {
+            display: none;
+            width: 300px;
+            flex-shrink: 0;
+            border-left: 1px solid var(--border-color);
+            padding: 16px;
+            overflow-y: auto;
+            text-align: center;
+        }
+
+        #preview-pane.active {
+            display: block;
+        }
+
+        #preview-pane img,
+        #preview-pane video {
+            max-width: 100%;
+            border-radius: 4px;
+        }
+
+        #preview-placeholder {
+            color: var(--text-secondary-color);
+        }
+
+        .status-bar {
+            padding: 4px 12px;
+            background: var(--bg-secondary-color);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+        }
+
+        .usage-display {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .usage-bar {
+            width: 150px;
+            height: 14px;
+            background: var(--bg-tertiary-color);
+            border-radius: 4px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+
+        .usage-fill {
+            height: 100%;
+            background: var(--accent-color);
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        #drag-drop-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            border: 2px dashed var(--accent-color);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            font-size: 24px;
+            color: var(--text-color);
+            z-index: 9999;
+            pointer-events: none;
+        }
+
+        #drag-drop-overlay.visible {
+            display: flex;
+        }
+
+        .context-menu {
+            position: fixed;
+            z-index: 1001;
+            background: #2b2b2b;
+            border: 1px solid #454545;
+            min-width: 250px;
+            padding: 4px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+        }
+
+        .context-menu-item {
+            position: relative;
+            padding: 6px 12px;
+            cursor: pointer;
+            white-space: nowrap;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+            border-radius: 4px;
+        }
+
+        .context-menu-item.disabled {
+            opacity: 0.5;
+            cursor: default;
+            background: none !important;
+        }
+
+        .context-menu-item:not(.disabled):hover {
+            background: var(--bg-hover);
+        }
+
+        .context-menu-item .label {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .context-menu-item .icon {
+            width: 16px;
+            height: 16px;
+            fill: var(--text-color);
+        }
+
+        .context-menu-item .hint {
+            color: var(--text-secondary-color);
+            font-size: 12px;
+        }
+
+        .context-menu-separator {
+            height: 1px;
+            background: #454545;
+            margin: 4px;
+        }
+
+        .context-menu-item.has-submenu::after {
+            content: '▶';
+            font-size: 10px;
+        }
+
+        .submenu {
+            display: none;
+            position: absolute;
+            left: 100%;
+            top: -5px;
+            background: #2b2b2b;
+            border: 1px solid #454545;
+            min-width: 180px;
+            padding: 4px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.4);
+            border-radius: 8px;
+            z-index: 1002;
+        }
+
+        #selection-rectangle {
+            position: absolute;
+            border: 1px solid var(--accent-color);
+            background-color: rgba(76, 194, 255, 0.2);
+            pointer-events: none;
+            z-index: 999;
+        }
     </style>
 </head>
+
 <body>
     <div class="explorer-container">
         <div class="header">
@@ -471,8 +1001,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             <div id="file-toolbar" class="toolbar">
                 <div class="ribbon-group">
                     <div class="ribbon-buttons">
-                         <button id="upload-file-btn"><span class="icon" id="icon-upload-file"></span><span class="label">ファイル</span></button>
-                         <button id="upload-folder-btn"><span class="icon" id="icon-upload-folder"></span><span class="label">フォルダー</span></button>
+                        <button id="upload-file-btn"><span class="icon" id="icon-upload-file"></span><span class="label">ファイル</span></button>
+                        <button id="upload-folder-btn"><span class="icon" id="icon-upload-folder"></span><span class="label">フォルダー</span></button>
                     </div>
                 </div>
             </div>
@@ -487,22 +1017,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 <div class="ribbon-separator"></div>
                 <div class="ribbon-group">
                     <div class="ribbon-buttons">
-                         <button id="delete-btn" disabled><span class="icon" id="icon-delete"></span><span class="label">削除</span></button>
-                         <button id="rename-btn" disabled><span class="icon" id="icon-rename"></span><span class="label">名前の変更</span></button>
+                        <button id="delete-btn" disabled><span class="icon" id="icon-delete"></span><span class="label">削除</span></button>
+                        <button id="rename-btn" disabled><span class="icon" id="icon-rename"></span><span class="label">名前の変更</span></button>
                     </div>
                 </div>
                 <div class="ribbon-separator"></div>
                 <div class="ribbon-group">
                     <div class="ribbon-buttons">
-                         <button id="new-folder-btn"><span class="icon" id="icon-new-folder"></span><span class="label">新しいフォルダー</span></button>
+                        <button id="new-folder-btn"><span class="icon" id="icon-new-folder"></span><span class="label">新しいフォルダー</span></button>
                     </div>
                 </div>
             </div>
             <div id="share-toolbar" class="toolbar">
                 <div class="ribbon-group">
                     <div class="ribbon-buttons">
-                         <button id="share-btn" disabled><span class="icon" id="icon-share"></span><span class="label">選択項目<br>の共有</span></button>
-                         <button id="manage-shares-btn"><span class="icon" id="icon-share-manage"></span><span class="label">共有の<br>管理</span></button>
+                        <button id="share-btn" disabled><span class="icon" id="icon-share"></span><span class="label">選択項目<br>の共有</span></button>
+                        <button id="manage-shares-btn"><span class="icon" id="icon-share-manage"></span><span class="label">共有の<br>管理</span></button>
                     </div>
                 </div>
             </div>
@@ -519,9 +1049,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                         <button id="details-btn" class="layout-btn active"><span class="icon" id="icon-details"></span><span class="label">詳細</span></button>
                     </div>
                 </div>
-                 <div class="ribbon-separator"></div>
+                <div class="ribbon-separator"></div>
                 <div class="ribbon-group">
-                     <div class="ribbon-buttons">
+                    <div class="ribbon-buttons">
                         <button id="item-checkboxes-btn" class="toggle-btn"><span class="icon" id="icon-checkboxes"></span><span class="label">チェック<br>ボックス</span></button>
                     </div>
                 </div>
@@ -539,17 +1069,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         </div>
         <div class="main-content">
             <div class="nav-pane" id="nav-pane">
-                 <div id="favorites-section">
+                <div id="favorites-section">
                     <div class="nav-group-header">お気に入り</div>
                     <div id="favorites-list"></div>
-                 </div>
-                 <div class="nav-group-header" style="margin-top: 16px;">PC</div>
-                 <div class="nav-item active" id="nav-home" data-path="/"><span class="icon" id="icon-user-folder"></span> <?php echo htmlspecialchars($username, ENT_QUOTES, 'UTF-8'); ?></div>
+                </div>
+                <div class="nav-group-header" style="margin-top: 16px;">PC</div>
+                <div class="nav-item active" id="nav-home" data-path="/"><span class="icon" id="icon-user-folder"></span> <?php echo htmlspecialchars($username, ENT_QUOTES, 'UTF-8'); ?></div>
             </div>
             <div class="content-area" id="content-area">
                 <div class="file-table-view" id="file-table-view">
                     <table class="file-table">
-                        <thead><tr><th class="col-check"><input type="checkbox" id="select-all-checkbox"></th><th class="col-name">名前</th><th class="col-modified">更新日時</th><th class="col-type">種類</th><th class="col-size">サイズ</th></tr></thead>
+                        <thead>
+                            <tr>
+                                <th class="col-check"><input type="checkbox" id="select-all-checkbox"></th>
+                                <th class="col-name">名前</th>
+                                <th class="col-modified">更新日時</th>
+                                <th class="col-type">種類</th>
+                                <th class="col-size">サイズ</th>
+                            </tr>
+                        </thead>
                         <tbody id="file-list-body"></tbody>
                     </table>
                 </div>
@@ -564,7 +1102,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         <div class="status-bar">
             <div id="item-count">0 項目</div>
             <div id="usage-display" class="usage-display">
-                <div id="usage-bar" class="usage-bar"><div id="usage-fill" class="usage-fill"></div></div>
+                <div id="usage-bar" class="usage-bar">
+                    <div id="usage-fill" class="usage-fill"></div>
+                </div>
                 <span id="usage-text"></span>
             </div>
         </div>
@@ -605,10 +1145,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             const shareBtn = getEl('share-btn');
             const manageSharesBtn = getEl('manage-shares-btn');
 
-            let currentPath = '/', selectedItems = new Map(), contextMenu = null, isSearchMode = false, favorites = [], currentLayout = 'details';
-            let clipboard = { type: null, items: [] };
-            let isSelecting = false, startX = 0, startY = 0, contentAreaRect;
-            const history = { past: [], future: [] };
+            let currentPath = '/',
+                selectedItems = new Map(),
+                contextMenu = null,
+                isSearchMode = false,
+                favorites = [],
+                currentLayout = 'details';
+            let clipboard = {
+                type: null,
+                items: []
+            };
+            let isSelecting = false,
+                startX = 0,
+                startY = 0,
+                contentAreaRect;
+            const history = {
+                past: [],
+                future: []
+            };
             const ICONS = {
                 'back': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.75.75 0 0 1 1.06 1.06L4.81 7.5h8.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06z"/></svg>',
                 'forward': '<svg fill="currentColor" viewBox="0 0 16 16"><path d="M8.22 3.47a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06l2.97-2.97H2.75a.75.75 0 0 1 0-1.5h8.44L8.22 4.53a.75.75 0 0 1 0-1.06z"/></svg>',
@@ -638,13 +1192,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             const apiCall = async (action, formData) => {
                 try {
                     formData.append('action', action);
-                    const response = await fetch('', { method: 'POST', body: formData });
+                    const response = await fetch('', {
+                        method: 'POST',
+                        body: formData
+                    });
                     if (!response.ok) {
                         const err = await response.json().catch(() => ({}));
                         throw new Error(err.message || `サーバーエラー: ${response.status}`);
                     }
                     const text = await response.text();
-                    if(!text) return null;
+                    if (!text) return null;
                     return JSON.parse(text);
                 } catch (error) {
                     console.error(`API Call Error (${action}):`, error);
@@ -675,7 +1232,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             };
             const updateUsage = async () => {
                 const data = await apiCall('get_usage', new FormData());
-                if(data && data.success) {
+                if (data && data.success) {
                     const percentage = data.total > 0 ? (data.used / data.total) * 100 : 0;
                     usageFill.style.width = `${Math.min(percentage, 100)}%`;
                     usageText.textContent = `${data.used_formatted} / ${data.total_formatted}`;
@@ -706,7 +1263,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             const navigateTo = (path, fromHistory = false) => {
                 if (currentPath === path && !fromHistory) return;
                 if (!fromHistory) {
-                    if(currentPath !== path) history.past.push(currentPath);
+                    if (currentPath !== path) history.past.push(currentPath);
                     history.future = [];
                 }
                 currentPath = path;
@@ -725,9 +1282,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 fileListBody.innerHTML = '';
                 fileGridView.innerHTML = '';
                 if (files.length === 0) {
-                     if (!isSearch) {
+                    if (!isSearch) {
                         fileListBody.innerHTML = '<tr class="empty-message"><td colspan="5">このフォルダーは空です。</td></tr>';
-                     }
+                    }
                 } else {
                     files.forEach(file => {
                         const filePath = file.path || (currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`);
@@ -738,7 +1295,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                         row.dataset.isDir = file.is_dir;
                         row.dataset.isSystem = file.is_system;
                         let nameCellHTML = `<div class="item-name-container"><span class="icon">${file.is_dir ? ICONS.folder : ICONS.file}</span><span class="item-name">${file.name}</span></div>`;
-                        if (isSearch) { nameCellHTML += `<div class="path">${filePath}</div>`; }
+                        if (isSearch) {
+                            nameCellHTML += `<div class="path">${filePath}</div>`;
+                        }
                         const checkboxHTML = `<td class="col-check"><input type="checkbox" class="item-checkbox" data-path="${filePath}"></td>`;
                         if (file.is_system) {
                             row.innerHTML = `${checkboxHTML}<td class="col-name">${nameCellHTML}</td><td class="col-modified"></td><td class="col-type"><span style="color: var(--text-secondary-color);">SYSTEM FILE</span></td><td class="col-size"></td>`;
@@ -767,7 +1326,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 const formData = new FormData();
                 formData.append('path', path);
                 const data = await apiCall('list', formData);
-                if (!data || !data.success) { if (path !== '/') navigateTo('/'); return; }
+                if (!data || !data.success) {
+                    if (path !== '/') navigateTo('/');
+                    return;
+                }
                 isSearchMode = false;
                 addressBar.style.display = 'flex';
                 addressInput.style.display = 'none';
@@ -776,7 +1338,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 renderItems(data.files, false);
                 updateUsage();
                 navPane.querySelectorAll('.nav-item').forEach(item => {
-                    if(item.dataset.path === path) item.classList.add('active');
+                    if (item.dataset.path === path) item.classList.add('active');
                     else item.classList.remove('active');
                 });
             };
@@ -784,9 +1346,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 e.stopPropagation();
                 hideContextMenu();
                 const itemPath = element.dataset.path;
-                const fileData = { path: itemPath, name: file.name, is_dir: file.is_dir, is_system: file.is_system };
+                const fileData = {
+                    path: itemPath,
+                    name: file.name,
+                    is_dir: file.is_dir,
+                    is_system: file.is_system
+                };
                 if (e.target.type === 'checkbox') {
-                     e.target.checked ? selectedItems.set(itemPath, fileData) : selectedItems.delete(itemPath);
+                    e.target.checked ? selectedItems.set(itemPath, fileData) : selectedItems.delete(itemPath);
                 } else if (e.ctrlKey) {
                     selectedItems.has(itemPath) ? selectedItems.delete(itemPath) : selectedItems.set(itemPath, fileData);
                 } else if (e.shiftKey && selectedItems.size > 0) {
@@ -799,12 +1366,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 updateSelection();
                 showPreview();
             };
-            const handleItemDblClick = (file, path) => { file.is_dir ? navigateTo(path) : downloadFile(path); };
+            const handleItemDblClick = (file, path) => {
+                file.is_dir ? navigateTo(path) : downloadFile(path);
+            };
             const handleItemContextMenu = (e, file, row) => {
                 e.preventDefault();
                 e.stopPropagation();
                 const itemPath = row.dataset.path;
-                const fileData = { path: itemPath, name: file.name, is_dir: file.is_dir, is_system: file.is_system };
+                const fileData = {
+                    path: itemPath,
+                    name: file.name,
+                    is_dir: file.is_dir,
+                    is_system: file.is_system
+                };
                 if (!selectedItems.has(itemPath)) {
                     selectedItems.clear();
                     selectedItems.set(itemPath, fileData);
@@ -879,22 +1453,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     contextMenu.querySelectorAll('.submenu').forEach(sm => sm.style.display = 'none');
                 });
             };
-            const hideContextMenu = () => { if (contextMenu) contextMenu.remove(); contextMenu = null; };
+            const hideContextMenu = () => {
+                if (contextMenu) contextMenu.remove();
+                contextMenu = null;
+            };
             const handleContextMenuAction = (action, fileInfo, element) => {
                 hideContextMenu();
                 const itemPath = element ? element.dataset.path : null;
                 switch (action) {
-                    case 'open': fileInfo.is_dir ? navigateTo(itemPath) : downloadFile(itemPath); break;
-                    case 'open-with-notepad': window.parent.postMessage({ type: 'openWithApp', app: 'notepad', filePath: itemPath }, '*'); break;
-                    case 'rename': initiateRename(element); break;
-                    case 'delete': deleteItems(); break;
-                    case 'cut': cutItems(); break;
-                    case 'paste': pasteItems(); break;
-                    case 'add_favorite': addFavorite(itemPath, fileInfo.name); break;
-                    case 'remove_favorite': removeFavorite(itemPath); break;
-                    case 'copy_path': copyToClipboard(currentPath); break;
-                    case 'create_file': createNewFile(); break;
-                    case 'create_folder': createFolder(); break;
+                    case 'open':
+                        fileInfo.is_dir ? navigateTo(itemPath) : downloadFile(itemPath);
+                        break;
+                    case 'open-with-notepad':
+                        window.parent.postMessage({
+                            type: 'openWithApp',
+                            app: 'notepad',
+                            filePath: itemPath
+                        }, '*');
+                        break;
+                    case 'rename':
+                        initiateRename(element);
+                        break;
+                    case 'delete':
+                        deleteItems();
+                        break;
+                    case 'cut':
+                        cutItems();
+                        break;
+                    case 'paste':
+                        pasteItems();
+                        break;
+                    case 'add_favorite':
+                        addFavorite(itemPath, fileInfo.name);
+                        break;
+                    case 'remove_favorite':
+                        removeFavorite(itemPath);
+                        break;
+                    case 'copy_path':
+                        copyToClipboard(currentPath);
+                        break;
+                    case 'create_file':
+                        createNewFile();
+                        break;
+                    case 'create_folder':
+                        createFolder();
+                        break;
                 }
             };
             const initiateRename = (rowElement) => {
@@ -903,12 +1506,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 if (!nameSpan || nameContainer.querySelector('input')) return;
                 const oldName = nameSpan.textContent;
                 nameSpan.style.display = 'none';
-                const input = document.createElement('input'); input.type = 'text'; input.value = oldName;
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.value = oldName;
                 const finishRename = async () => {
                     input.removeEventListener('blur', finishRename);
                     input.removeEventListener('keydown', keydownHandler);
                     const newName = input.value.trim();
-                    nameSpan.style.display = ''; input.remove();
+                    nameSpan.style.display = '';
+                    input.remove();
                     if (newName && newName !== oldName) {
                         const formData = new FormData();
                         formData.append('item_path', rowElement.dataset.path);
@@ -917,7 +1523,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                         if (result && result.success) isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath);
                     }
                 };
-                const keydownHandler = e => { if (e.key === 'Enter') finishRename(); else if (e.key === 'Escape') { input.removeEventListener('blur', finishRename); nameSpan.style.display = ''; input.remove(); } };
+                const keydownHandler = e => {
+                    if (e.key === 'Enter') finishRename();
+                    else if (e.key === 'Escape') {
+                        input.removeEventListener('blur', finishRename);
+                        nameSpan.style.display = '';
+                        input.remove();
+                    }
+                };
                 input.addEventListener('blur', finishRename);
                 input.addEventListener('keydown', keydownHandler);
                 nameContainer.appendChild(input);
@@ -928,13 +1541,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 const formData = new FormData();
                 formData.append('path', currentPath);
                 const relativePaths = [];
-                for (const file of files) { formData.append('files[]', file, file.name); if (isFolder && file.webkitRelativePath) relativePaths.push(file.webkitRelativePath); }
+                for (const file of files) {
+                    formData.append('files[]', file, file.name);
+                    if (isFolder && file.webkitRelativePath) relativePaths.push(file.webkitRelativePath);
+                }
                 if (isFolder) formData.append('relative_paths', JSON.stringify(relativePaths));
                 const result = await apiCall('upload', formData);
                 if (result && result.success) loadDirectory(currentPath);
             };
             const createFolder = async () => {
-                const name = prompt('新しいフォルダ名:', '新しいフォルダー'); if (!name) return;
+                const name = prompt('新しいフォルダ名:', '新しいフォルダー');
+                if (!name) return;
                 const formData = new FormData();
                 formData.append('path', currentPath);
                 formData.append('name', name);
@@ -942,7 +1559,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 if (result && result.success) loadDirectory(currentPath);
             };
             const createNewFile = async () => {
-                const name = prompt('新しいファイル名:', '新規テキストドキュメント.txt'); if (!name) return;
+                const name = prompt('新しいファイル名:', '新規テキストドキュメント.txt');
+                if (!name) return;
                 const formData = new FormData();
                 formData.append('path', currentPath);
                 formData.append('name', name);
@@ -953,9 +1571,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 if (selectedItems.size === 0 || !confirm(`${selectedItems.size}個の項目を完全に削除しますか？`)) return;
                 const itemsToDelete = Array.from(selectedItems.values());
                 const formData = new FormData();
-                formData.append('items', JSON.stringify(itemsToDelete.map(item => ({path: item.path, name: item.name}))));
+                formData.append('items', JSON.stringify(itemsToDelete.map(item => ({
+                    path: item.path,
+                    name: item.name
+                }))));
                 const result = await apiCall('delete', formData);
-                if (result && result.success) { selectedItems.clear(); isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath); }
+                if (result && result.success) {
+                    selectedItems.clear();
+                    isSearchMode ? searchFiles(searchBox.value) : loadDirectory(currentPath);
+                }
             };
             const cutItems = () => {
                 if (selectedItems.size > 0) {
@@ -974,18 +1598,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     result = await apiCall('move', formData);
                 }
                 if (result && result.success) {
-                    clipboard = { type: null, items: [] };
+                    clipboard = {
+                        type: null,
+                        items: []
+                    };
                     loadDirectory(currentPath);
                 } else {
                     updateSelection();
                 }
             };
-            const downloadFile = (filePath) => { window.location.href = `?action=download&file=${encodeURIComponent(filePath)}`; };
+            const downloadFile = (filePath) => {
+                window.location.href = `?action=download&file=${encodeURIComponent(filePath)}`;
+            };
             const searchFiles = async (term) => {
                 const formData = new FormData();
                 formData.append('query', term);
                 const data = await apiCall('search', formData);
-                if (data && data.success) { isSearchMode = true; renderItems(data.files, true); }
+                if (data && data.success) {
+                    isSearchMode = true;
+                    renderItems(data.files, true);
+                }
             };
             const loadFavorites = async () => {
                 const data = await apiCall('get_favorites', new FormData());
@@ -1005,10 +1637,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 if (favorites.length > 0) {
                     favorites.forEach(fav => {
                         const favEl = document.createElement('div');
-                        favEl.className = 'nav-item nested favorite'; favEl.dataset.path = fav.path;
+                        favEl.className = 'nav-item nested favorite';
+                        favEl.dataset.path = fav.path;
                         favEl.innerHTML = `<span class="icon">${ICONS.folder}</span> <span>${fav.name}</span>`;
                         favEl.addEventListener('click', () => navigateTo(fav.path));
-                        favEl.addEventListener('contextmenu', (e) => { e.preventDefault(); e.stopPropagation(); showFavoriteContextMenu(e, fav.path); });
+                        favEl.addEventListener('contextmenu', (e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            showFavoriteContextMenu(e, fav.path);
+                        });
                         favoritesListEl.appendChild(favEl);
                     });
                 }
@@ -1031,7 +1668,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             };
             const addFavorite = (path, name) => {
                 if (!favorites.some(fav => fav.path === path)) {
-                    favorites.push({ path, name });
+                    favorites.push({
+                        path,
+                        name
+                    });
                     saveFavorites();
                     renderFavorites();
                 }
@@ -1050,21 +1690,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             };
             const showPreview = () => {
                 if (!previewPane.classList.contains('active') || selectedItems.size !== 1) {
-                    previewContent.innerHTML = ''; previewPlaceholder.textContent = 'プレビューするファイルを選択してください'; previewPlaceholder.style.display = 'block';
+                    previewContent.innerHTML = '';
+                    previewPlaceholder.textContent = 'プレビューするファイルを選択してください';
+                    previewPlaceholder.style.display = 'block';
                     return;
                 }
-                const [filePath] = selectedItems.keys(); const ext = filePath.split('.').pop().toLowerCase();
+                const [filePath] = selectedItems.keys();
+                const ext = filePath.split('.').pop().toLowerCase();
                 const imageExts = ['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp', 'bmp'];
                 const videoExts = ['mp4', 'webm', 'ogg'];
-                previewPlaceholder.style.display = 'none'; previewContent.innerHTML = '';
+                previewPlaceholder.style.display = 'none';
+                previewContent.innerHTML = '';
                 if (imageExts.includes(ext)) {
-                    const img = document.createElement('img'); img.src = `?action=download&file=${encodeURIComponent(filePath)}`;
+                    const img = document.createElement('img');
+                    img.src = `?action=download&file=${encodeURIComponent(filePath)}`;
                     previewContent.appendChild(img);
                 } else if (videoExts.includes(ext)) {
-                     const video = document.createElement('video'); video.src = `?action=download&file=${encodeURIComponent(filePath)}`; video.controls = true;
-                     previewContent.appendChild(video);
+                    const video = document.createElement('video');
+                    video.src = `?action=download&file=${encodeURIComponent(filePath)}`;
+                    video.controls = true;
+                    previewContent.appendChild(video);
                 } else {
-                     previewPlaceholder.textContent = 'このファイル形式のプレビューはありません。'; previewPlaceholder.style.display = 'block';
+                    previewPlaceholder.textContent = 'このファイル形式のプレビューはありません。';
+                    previewPlaceholder.style.display = 'block';
                 }
             };
             const startSelection = (e) => {
@@ -1101,7 +1749,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 items.forEach(itemEl => {
                     const itemRect = itemEl.getBoundingClientRect();
                     const path = itemEl.dataset.path;
-                    const fileData = { path, name: itemEl.dataset.name, is_dir: itemEl.dataset.isDir === 'true', is_system: itemEl.dataset.isSystem === 'true' };
+                    const fileData = {
+                        path,
+                        name: itemEl.dataset.name,
+                        is_dir: itemEl.dataset.isDir === 'true',
+                        is_system: itemEl.dataset.isSystem === 'true'
+                    };
                     if (rect.left < itemRect.right && rect.right > itemRect.left && rect.top < itemRect.bottom && rect.bottom > itemRect.top) {
                         if (!selectedItems.has(path)) selectedItems.set(path, fileData);
                     }
@@ -1140,7 +1793,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
             }));
 
             document.addEventListener('click', (e) => {
-                if(e.target.closest('.context-menu-item')) {
+                if (e.target.closest('.context-menu-item')) {
                     const item = e.target.closest('.context-menu-item');
                     if (item && !item.classList.contains('has-submenu') && !item.classList.contains('disabled')) {
                         const selectedRow = fileListBody.querySelector('tr.selected') || fileGridView.querySelector('.grid-item.selected');
@@ -1152,7 +1805,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                         handleContextMenuAction(item.dataset.action, fileInfo, selectedRow);
                     }
                 } else if (contextMenu && !contextMenu.contains(e.target)) {
-                     hideContextMenu();
+                    hideContextMenu();
                 }
 
                 const clickedInside = e.target.closest('.content-area, .toolbar, .nav-pane, .address-bar-container, .modal-content, .context-menu');
@@ -1173,45 +1826,130 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`);
                     if (el) initiateRename(el);
                 }
-                if (e.ctrlKey && e.key.toLowerCase() === 'x') { e.preventDefault(); cutItems(); }
-                if (e.ctrlKey && e.key.toLowerCase() === 'v') { e.preventDefault(); pasteItems(); }
+                if (e.ctrlKey && e.key.toLowerCase() === 'x') {
+                    e.preventDefault();
+                    cutItems();
+                }
+                if (e.ctrlKey && e.key.toLowerCase() === 'v') {
+                    e.preventDefault();
+                    pasteItems();
+                }
             });
 
             addEventListenerIfPresent('upload-file-btn', 'click', () => fileInput.click());
             addEventListenerIfPresent('upload-folder-btn', 'click', () => folderInput.click());
-            addEventListenerIfPresent('preview-pane-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); previewPane.classList.toggle('active'); showPreview(); });
-            addEventListenerIfPresent('item-checkboxes-btn', 'click', (e) => { e.currentTarget.classList.toggle('active'); explorerContainer.classList.toggle('show-checkboxes'); });
+            addEventListenerIfPresent('preview-pane-btn', 'click', (e) => {
+                e.currentTarget.classList.toggle('active');
+                previewPane.classList.toggle('active');
+                showPreview();
+            });
+            addEventListenerIfPresent('item-checkboxes-btn', 'click', (e) => {
+                e.currentTarget.classList.toggle('active');
+                explorerContainer.classList.toggle('show-checkboxes');
+            });
             addEventListenerIfPresent('new-folder-btn', 'click', createFolder);
             addEventListenerIfPresent('delete-btn', 'click', deleteItems);
-            addEventListenerIfPresent('rename-btn', 'click', () => { if(selectedItems.size !== 1) return; const path = selectedItems.keys().next().value; const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`); if (el) initiateRename(el); });
+            addEventListenerIfPresent('rename-btn', 'click', () => {
+                if (selectedItems.size !== 1) return;
+                const path = selectedItems.keys().next().value;
+                const el = document.querySelector(`[data-path="${CSS.escape(path)}"]`);
+                if (el) initiateRename(el);
+            });
             addEventListenerIfPresent('cut-btn', 'click', cutItems);
             addEventListenerIfPresent('paste-btn', 'click', pasteItems);
 
             document.querySelectorAll('.layout-btn').forEach(btn => btn.addEventListener('click', (e) => {
                 document.querySelector('.layout-btn.active')?.classList.remove('active');
-                const target = e.currentTarget; target.classList.add('active'); currentLayout = target.id === 'large-icons-btn' ? 'grid' : 'details';
+                const target = e.currentTarget;
+                target.classList.add('active');
+                currentLayout = target.id === 'large-icons-btn' ? 'grid' : 'details';
                 fileTableView.style.display = currentLayout === 'details' ? 'block' : 'none';
                 fileGridView.style.display = currentLayout === 'grid' ? 'flex' : 'none';
             }));
 
-            navBackBtn.addEventListener('click', () => { if (history.past.length > 0) { history.future.unshift(currentPath); navigateTo(history.past.pop(), true); } });
-            navForwardBtn.addEventListener('click', () => { if (history.future.length > 0) { history.past.push(currentPath); navigateTo(history.future.shift(), true); } });
-            navUpBtn.addEventListener('click', () => { if (currentPath !== '/') navigateTo(currentPath.substring(0, currentPath.lastIndexOf('/')) || '/'); });
+            navBackBtn.addEventListener('click', () => {
+                if (history.past.length > 0) {
+                    history.future.unshift(currentPath);
+                    navigateTo(history.past.pop(), true);
+                }
+            });
+            navForwardBtn.addEventListener('click', () => {
+                if (history.future.length > 0) {
+                    history.past.push(currentPath);
+                    navigateTo(history.future.shift(), true);
+                }
+            });
+            navUpBtn.addEventListener('click', () => {
+                if (currentPath !== '/') navigateTo(currentPath.substring(0, currentPath.lastIndexOf('/')) || '/');
+            });
             fileInput.addEventListener('change', (e) => uploadFiles(e.target.files, false));
             folderInput.addEventListener('change', (e) => uploadFiles(e.target.files, true));
-            searchBox.addEventListener('input', () => { const term = searchBox.value.trim(); if (term === '') { if (isSearchMode) navigateTo(currentPath); } else { searchFiles(term); } });
+            searchBox.addEventListener('input', () => {
+                const term = searchBox.value.trim();
+                if (term === '') {
+                    if (isSearchMode) navigateTo(currentPath);
+                } else {
+                    searchFiles(term);
+                }
+            });
             getEl('nav-home').addEventListener('click', () => navigateTo('/'));
             const body = document.body;
-            body.addEventListener('dragenter', (e) => { e.preventDefault(); dragDropOverlay.classList.add('visible'); });
-            body.addEventListener('dragover', (e) => { e.preventDefault(); });
-            body.addEventListener('dragleave', (e) => { if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) dragDropOverlay.classList.remove('visible'); });
-            body.addEventListener('drop', (e) => { e.preventDefault(); dragDropOverlay.classList.remove('visible'); uploadFiles(e.dataTransfer.files, false); });
+            body.addEventListener('dragenter', (e) => {
+                e.preventDefault();
+                dragDropOverlay.classList.add('visible');
+            });
+            body.addEventListener('dragover', (e) => {
+                e.preventDefault();
+            });
+            body.addEventListener('dragleave', (e) => {
+                if (e.clientX <= 0 || e.clientY <= 0 || e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) dragDropOverlay.classList.remove('visible');
+            });
+            body.addEventListener('drop', (e) => {
+                e.preventDefault();
+                dragDropOverlay.classList.remove('visible');
+                uploadFiles(e.dataTransfer.files, false);
+            });
             contentArea.addEventListener('mousedown', startSelection);
-            contentArea.addEventListener('contextmenu', (e) => { if (e.target.closest('.file-item') || e.target.closest('.grid-item')) return; e.preventDefault(); showViewContextMenu(e); });
+            contentArea.addEventListener('contextmenu', (e) => {
+                if (e.target.closest('.file-item') || e.target.closest('.grid-item')) return;
+                e.preventDefault();
+                showViewContextMenu(e);
+            });
 
             loadFavorites();
             loadDirectory(currentPath);
             updateNavButtons();
+        });
+
+        const myWindowIdForMessaging = window.name;
+
+        document.addEventListener('mousedown', () => {
+            window.parent.postMessage({
+                type: 'iframeClick',
+                windowId: myWindowIdForMessaging
+            }, '*');
+        }, true);
+
+        document.addEventListener('keydown', (e) => {
+            if ((e.altKey && e.key.toLowerCase() === 'w') || (e.altKey && ['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key))) {
+                e.preventDefault();
+                window.parent.postMessage({
+                    type: 'forwardedKeydown',
+                    key: e.key,
+                    altKey: e.altKey,
+                    ctrlKey: e.ctrlKey,
+                    shiftKey: e.shiftKey,
+                    metaKey: e.metaKey,
+                    windowId: myWindowIdForMessaging
+                }, '*');
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'Alt') {
+                e.preventDefault();
+                window.parent.postMessage({ type: 'forwardedKeyup', key: e.key }, '*');
+            }
         });
     </script>
 </body>

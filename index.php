@@ -34,6 +34,27 @@ $initialState = $auth->getInitialState();
     </style>
 </head>
 <body>
+    <div id="desktop"></div>
+
+    <div id="window-switcher" style="display: none;">
+        <div class="windows-container"></div>
+    </div>
+    
+    <div id="privacy-policy-overlay" style="display: none;" tabindex="-1">
+        <div class="bios-screen">
+            <header class="bios-header">プライバシーポリシー</header>
+            <div class="privacy-content" tabindex="0"></div>
+            <footer class="bios-footer">
+                <button id="privacy-ok-btn" disabled>OK (Enter)</button>
+                <span>(下にスクロールして同意)</span>
+            </footer>
+        </div>
+    </div>
+
+    <div id="minimized-area"></div>
+    <div class="snap-indicator" style="display: none;"></div>
+    <div id="context-menu-container"></div>
+
     <template id="console-window-template">
         <div class="window-container console-window">
             <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
@@ -46,7 +67,7 @@ $initialState = $auth->getInitialState();
         <div class="window-container explorer-window">
             <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
             <div class="title-bar"><div class="title-bar-text"><span class="title-bar-icon icon-explorer"></span><span class="window-title">エクスプローラー</span></div><div class="window-controls"><span class="minimize-btn">_</span><span class="maximize-btn">&#10065;</span><span class="close-btn">X</span></div></div>
-            <iframe src="system/application/explorer.php" class="window-content-frame" name="explorer-iframe-<?php echo uniqid(); ?>"></iframe>
+            <iframe src="about:blank" class="window-content-frame" name="explorer-iframe-<?php echo uniqid(); ?>"></iframe>
         </div>
     </template>
 
@@ -54,7 +75,7 @@ $initialState = $auth->getInitialState();
         <div class="window-container notepad-window">
             <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
             <div class="title-bar"><div class="title-bar-text"><span class="title-bar-icon icon-notepad"></span><span class="window-title">無題 - メモ帳</span></div><div class="window-controls"><span class="minimize-btn">_</span><span class="maximize-btn">&#10065;</span><span class="close-btn">X</span></div></div>
-            <iframe src="system/application/notepad.php" class="window-content-frame" name="notepad-iframe-<?php echo uniqid(); ?>"></iframe>
+            <iframe src="about:blank" class="window-content-frame" name="notepad-iframe-<?php echo uniqid(); ?>"></iframe>
         </div>
     </template>
 
@@ -81,22 +102,7 @@ $initialState = $auth->getInitialState();
             <iframe src="" class="window-content-frame" name="file_explorer_dialog-iframe-<?php echo uniqid(); ?>"></iframe>
         </div>
     </template>
-
-    <div id="privacy-policy-overlay" style="display: none;" tabindex="-1">
-        <div class="bios-screen">
-            <header class="bios-header">プライバシーポリシー</header>
-            <div class="privacy-content" tabindex="0"></div>
-            <footer class="bios-footer">
-                <button id="privacy-ok-btn" disabled>OK (Enter)</button>
-                <span>(下にスクロールして同意)</span>
-            </footer>
-        </div>
-    </div>
-
-    <div id="minimized-area"></div>
-    <div class="snap-indicator" style="display: none;"></div>
-    <div id="context-menu-container"></div>
-
+    
     <script type="text/javascript">
         const initialClientState = <?php echo json_encode($initialState); ?>;
     </script>

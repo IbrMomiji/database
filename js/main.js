@@ -27,6 +27,60 @@ class App {
         });
     }
 
+    _processGlobalKeydown(e) {
+        if (document.getElementById('privacy-policy-overlay').style.display === 'flex') {
+            return;
+        }
+
+        if (e.altKey && e.key.toLowerCase() === 'w') {
+            e.preventDefault();
+            if (!this.windowSwitcher.isVisible) {
+                this.windowSwitcher.isAltHeld = true;
+                this.windowSwitcher.show();
+            } else if (this.windowSwitcher.isAltHeld) {
+                this.windowSwitcher.navigate(1);
+            }
+            return;
+        }
+
+        if (this.windowSwitcher.isVisible) {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                this.windowSwitcher.hide();
+            }
+            return;
+        }
+
+        if (this.contextMenu.isVisible()) {
+            this.contextMenu.handleKeyPress(e);
+            return;
+        }
+        
+        const topWindow = this.windowManager.getTopWindow();
+        if (topWindow && e.altKey && ['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+            e.preventDefault();
+            if (e.key === 'ArrowUp') this.windowManager.toggleMaximize(topWindow.id);
+            if (e.key === 'ArrowLeft') this.windowManager.snapWindow(topWindow.id, 'left');
+            if (e.key === 'ArrowRight') this.windowManager.snapWindow(topWindow.id, 'right');
+            return;
+        }
+
+        if (e.isTrusted) {
+            const activeEl = document.activeElement;
+            const isTextInputInParent = activeEl && (['INPUT', 'TEXTAREA'].includes(activeEl.tagName) || activeEl.isContentEditable);
+            if (isTextInputInParent || activeEl.tagName === 'IFRAME') {
+                 return;
+            }
+        }
+        
+        if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
+            const topConsole = this.windowManager.getTopmostConsole();
+            if (topConsole) {
+                this.windowManager.focus(topConsole.id);
+            }
+        }
+    }
+
     _setupEventListeners() {
         const minimizedArea = document.getElementById('minimized-area');
         if (minimizedArea) {
@@ -40,67 +94,17 @@ class App {
             });
         }
 
-        window.addEventListener('keydown', (e) => {
-            if (document.getElementById('privacy-policy-overlay').style.display === 'flex') {
-                return;
-            }
+        window.addEventListener('keydown', this._processGlobalKeydown.bind(this));
+        
+        window.addEventListener('message', (event) => {
+            if (!event.data || !event.data.type) return;
 
-            if (e.altKey && e.key.toLowerCase() === 'w') {
-                e.preventDefault();
-                if (!this.windowSwitcher.isVisible) {
-                    this.windowSwitcher.isAltHeld = true;
-                    this.windowSwitcher.show();
-                } else if (this.windowSwitcher.isAltHeld) {
-                    this.windowSwitcher.navigate(1);
-                }
-                return;
-            }
-            if (this.windowSwitcher.isVisible) {
-                if (e.key === 'Escape') {
-                    e.preventDefault();
-                    this.windowSwitcher.hide();
-                }
-                return;
-            }
-            if (this.contextMenu.isVisible()) {
-                this.contextMenu.handleKeyPress(e);
-                return;
-            }
-
-            let isTextInput = false;
-            const activeEl = document.activeElement;
-            if (activeEl) {
-                if (activeEl.tagName === 'IFRAME') {
-                    try {
-                        const iframeActiveEl = activeEl.contentWindow.document.activeElement;
-                        if (iframeActiveEl) {
-                            isTextInput = ['INPUT', 'TEXTAREA'].includes(iframeActiveEl.tagName) || iframeActiveEl.isContentEditable;
-                        }
-                    } catch (err) {
-                        isTextInput = true;
-                    }
-                } else {
-                    isTextInput = ['INPUT', 'TEXTAREA'].includes(activeEl.tagName);
-                }
-            }
-            
-            if (!isTextInput) {
-                const topWindow = this.windowManager.getTopWindow();
-
-                if (e.ctrlKey && ['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
-                    if (topWindow) {
-                        e.preventDefault();
-                        if (e.key === 'ArrowUp') this.windowManager.toggleMaximize(topWindow.id);
-                        if (e.key === 'ArrowLeft') this.windowManager.snapWindow(topWindow.id, 'left');
-                        if (e.key === 'ArrowRight') this.windowManager.snapWindow(topWindow.id, 'right');
-                    }
-                }
-                else if (!e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1) {
-                    const topConsole = this.windowManager.getTopmostConsole();
-                    if (topConsole) {
-                        this.windowManager.focus(topConsole.id);
-                    }
-                }
+            if (event.data.type === 'forwardedKeydown') {
+                const syntheticEvent = new KeyboardEvent('keydown', { ...event.data, bubbles: true, cancelable: true });
+                this._processGlobalKeydown(syntheticEvent);
+            } else if (event.data.type === 'forwardedKeyup') {
+                const syntheticEvent = new KeyboardEvent('keyup', { ...event.data, bubbles: true, cancelable: true });
+                window.dispatchEvent(syntheticEvent);
             }
         });
     }

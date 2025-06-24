@@ -1,91 +1,98 @@
-/**
- * Alt+Wによるウィンドウ切り替え機能のUIとロジックを管理します。
- */
 export class WindowSwitcher {
-    /**
-     * @param {WindowManager} windowManager WindowManagerのインスタンス
-     */
     constructor(windowManager) {
         this.windowManager = windowManager;
-        this.switcherElement = null;
-        this.listElement = null;
-
-        this.isVisible = false;
+        this.switcherEl = document.getElementById('window-switcher');
+        this.windowsContainer = this.switcherEl.querySelector('.windows-container');
         this.windows = [];
         this.selectedIndex = 0;
+        this.isVisible = false;
         this.isAltHeld = false;
 
-        this._boundHandleKeyUp = this.handleKeyUp.bind(this);
+        this.boundHandleKeyDown = this.handleKeyDown.bind(this);
+        this.boundHandleKeyUp = this.handleKeyUp.bind(this);
     }
 
     show() {
-        const windowIds = Array.from(this.windowManager.zOrder || []).reverse();
-        
-        if (windowIds.length <= 1) {
-            return;
-        }
-        
-        this.windows = windowIds
-            .map(id => {
-                const winObject = this.windowManager.windows.get(id);
-                return (winObject && winObject.el) ? winObject.el : null;
-            })
-            .filter(el => el !== null);
+        this.updateWindowList();
+        if (this.windows.length === 0) return;
 
-        if (this.windows.length <= 1) {
-            return;
-        }
-
-        if (!this.switcherElement) {
-            this._createSwitcherElement();
-        }
-
-        this.listElement.innerHTML = '';
-
-        this.windows.forEach(winEl => {
-            const item = document.createElement('li');
-            item.className = 'window-switcher-item';
-            item.dataset.windowId = winEl.id;
-
-            const iconContainer = document.createElement('div');
-            iconContainer.className = 'icon';
-            const originalIcon = winEl.querySelector('.title-bar-icon');
-            if (originalIcon) {
-                const iconClone = originalIcon.cloneNode(true);
-                iconContainer.appendChild(iconClone);
-            }
-
-            const title = document.createElement('div');
-            title.className = 'title';
-            title.textContent = winEl.querySelector('.window-title')?.textContent || '無題のウィンドウ';
-
-            item.appendChild(iconContainer);
-            item.appendChild(title);
-            
-            item.addEventListener('click', () => {
-               this.windowManager.focus(winEl.id);
-               this.hide();
-            });
-
-            this.listElement.appendChild(item);
-        });
-
-        this.selectedIndex = 1;
-        this.updateSelection();
-        this.switcherElement.style.display = 'flex';
+        this.selectedIndex = this.windows.length > 1 ? 1 : 0;
+        this.highlightSelection();
+        this.switcherEl.style.display = 'flex';
         this.isVisible = true;
 
-        document.addEventListener('keyup', this._boundHandleKeyUp);
+        window.addEventListener('keydown', this.boundHandleKeyDown, true);
+        window.addEventListener('keyup', this.boundHandleKeyUp, true);
     }
 
     hide() {
-        if (!this.isVisible) return;
-        if (this.switcherElement) {
-            this.switcherElement.style.display = 'none';
-        }
+        this.switcherEl.style.display = 'none';
         this.isVisible = false;
         this.isAltHeld = false;
-        document.removeEventListener('keyup', this._boundHandleKeyUp);
+        window.removeEventListener('keydown', this.boundHandleKeyDown, true);
+        window.removeEventListener('keyup', this.boundHandleKeyUp, true);
+    }
+
+    updateWindowList() {
+        this.windowsContainer.innerHTML = '';
+        this.windows = [];
+        
+        const zOrderedIds = [...this.windowManager.zOrder].reverse();
+
+        zOrderedIds.forEach(id => {
+            const winData = this.windowManager.windows.get(id);
+            if (winData && winData.state !== 'minimized') {
+                const winEl = document.createElement('div');
+                winEl.className = 'window-preview';
+                winEl.id = winData.id;
+                
+                const iconEl = winData.el.querySelector('.title-bar-icon')?.cloneNode(true) || document.createElement('div');
+                iconEl.className = 'icon';
+                
+                const titleEl = document.createElement('span');
+                titleEl.className = 'title';
+                titleEl.textContent = winData.el.querySelector('.window-title')?.textContent || winData.type;
+
+                winEl.appendChild(iconEl);
+                winEl.appendChild(titleEl);
+                this.windowsContainer.appendChild(winEl);
+                this.windows.push(winEl);
+            }
+        });
+    }
+
+    navigate(direction) {
+        if (!this.isVisible || this.windows.length === 0) return;
+        this.selectedIndex = (this.selectedIndex + direction + this.windows.length) % this.windows.length;
+        this.highlightSelection();
+    }
+
+    highlightSelection() {
+        this.windows.forEach((el, index) => {
+            el.classList.toggle('selected', index === this.selectedIndex);
+        });
+    }
+
+    handleKeyDown(e) {
+        if (!this.isVisible) return;
+        
+        if (e.key === 'Tab' || (this.isAltHeld && e.key.toLowerCase() === 'w')) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.navigate(e.shiftKey ? -1 : 1);
+        } else if (e.key === 'ArrowRight') {
+            e.preventDefault();
+            this.navigate(1);
+        } else if (e.key === 'ArrowLeft') {
+            e.preventDefault();
+            this.navigate(-1);
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            this.boundHandleKeyUp({ key: 'Alt', preventDefault: () => {} });
+        } else if (e.key === 'Escape') {
+             e.preventDefault();
+             this.hide();
+        }
     }
 
     handleKeyUp(e) {
@@ -95,63 +102,11 @@ export class WindowSwitcher {
                 const selectedWindowElement = this.windows[this.selectedIndex];
                 if (selectedWindowElement) {
                     const windowId = selectedWindowElement.id;
-                    
-                    // ウィンドウを最前面に表示
-                    this.windowManager.bringToFront(windowId);
-
-                    // --- NEW LOGIC ---
-                    // iframeを持つウィンドウを選択した場合、iframeからフォーカスを外し
-                    // 親ウィンドウに制御を戻すことで、後続のショートカットが効くようにする。
-                    const winData = this.windowManager.windows.get(windowId);
-                    if (winData && winData.type !== 'console') {
-                        const iframe = winData.el.querySelector('iframe');
-                        if (iframe) {
-                           iframe.blur(); // iframeのフォーカスを外す
-                           window.focus(); // 親ウィンドウにフォーカスを戻す
-                        }
-                    } else if (winData) {
-                        // コンソールウィンドウの場合は、通常通りフォーカスする
-                        this.windowManager.focus(windowId);
-                    }
+                    this.windowManager.focus(windowId);
                 }
                 this.hide();
             }
+            this.isAltHeld = false;
         }
-    }
-
-    navigate(direction) {
-        if (!this.isVisible) return;
-        const numWindows = this.windows.length;
-        if (numWindows === 0) return;
-        
-        this.selectedIndex = (this.selectedIndex + direction + numWindows) % numWindows;
-        this.updateSelection();
-    }
-
-    updateSelection() {
-        Array.from(this.listElement.children).forEach((item, index) => {
-            if (index === this.selectedIndex) {
-                item.classList.add('selected');
-                item.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-            } else {
-                item.classList.remove('selected');
-            }
-        });
-    }
-    
-    _createSwitcherElement() {
-        const overlay = document.createElement('div');
-        overlay.id = 'window-switcher';
-        overlay.className = 'window-switcher-overlay';
-        overlay.style.display = 'none';
-
-        const list = document.createElement('ul');
-        list.id = 'window-switcher-list';
-        
-        overlay.appendChild(list);
-        document.body.appendChild(overlay);
-
-        this.switcherElement = overlay;
-        this.listElement = list;
     }
 }
