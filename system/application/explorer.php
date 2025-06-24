@@ -447,7 +447,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         #drag-drop-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); border: 2px dashed var(--accent-color); display: none; justify-content: center; align-items: center; font-size: 24px; color: var(--text-color); z-index: 9999; pointer-events: none; }
         #drag-drop-overlay.visible { display: flex; }
         .context-menu { position: fixed; z-index: 1001; background: #2b2b2b; border: 1px solid #454545; min-width: 250px; padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); border-radius: 8px; }
-        .context-menu-item { padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; justify-content: space-between; align-items: center; user-select: none; border-radius: 4px; }
+        .context-menu-item { position: relative; padding: 6px 12px; cursor: pointer; white-space: nowrap; display: flex; justify-content: space-between; align-items: center; user-select: none; border-radius: 4px; }
         .context-menu-item.disabled { opacity: 0.5; cursor: default; background: none !important; }
         .context-menu-item:not(.disabled):hover { background: var(--bg-hover); }
         .context-menu-item .label { display: flex; align-items: center; gap: 12px; }
@@ -455,8 +455,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         .context-menu-item .hint { color: var(--text-secondary-color); font-size: 12px; }
         .context-menu-separator { height: 1px; background: #454545; margin: 4px; }
         .context-menu-item.has-submenu::after { content: '▶'; font-size: 10px; }
-        .submenu { display: none; position: fixed; background: #2b2b2b; border: 1px solid #454545; min-width: 180px; padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); border-radius: 8px; z-index: 1002; }
-        .context-menu-item:hover > .submenu { display: block; }
+        .submenu { display: none; position: absolute; left: 100%; top: -5px; background: #2b2b2b; border: 1px solid #454545; min-width: 180px; padding: 4px; box-shadow: 0 8px 16px rgba(0,0,0,0.4); border-radius: 8px; z-index: 1002; }
         #selection-rectangle { position: absolute; border: 1px solid var(--accent-color); background-color: rgba(76, 194, 255, 0.2); pointer-events: none; z-index: 999; }
     </style>
 </head>
@@ -813,21 +812,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 }
                 showContextMenu(e, fileData, row);
             };
-            const positionMenu = (menu, x, y, parentElement = null) => {
-                const menuRect = menu.getBoundingClientRect();
-                let newX = x, newY = y;
-                if (parentElement) {
-                    const parentRect = parentElement.getBoundingClientRect();
-                    newX = parentRect.right;
-                    if (newX + menuRect.width > window.innerWidth) newX = parentRect.left - menuRect.width;
-                    newY = parentRect.top;
-                } else {
-                     if (newX + menuRect.width > window.innerWidth) newX = window.innerWidth - menuRect.width - 5;
-                }
-                if (newY + menuRect.height > window.innerHeight) newY = window.innerHeight - menuRect.height - 5;
-                if (newX < 0) newX = 5; if (newY < 0) newY = 5;
-                menu.style.left = `${newX}px`; menu.style.top = `${newY}px`;
-            };
             const showContextMenu = (e, fileInfo, element) => {
                 hideContextMenu();
                 contextMenu = document.createElement('div');
@@ -859,7 +843,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                     menuItemsHTML += `<div class="context-menu-item" data-action="copy_path"><span class="label">パスのコピー</span></div>`;
                 }
                 contextMenu.innerHTML = menuItemsHTML;
-                positionMenu(contextMenu, e.clientX, e.clientY);
+                const menuRect = contextMenu.getBoundingClientRect();
+                let x = e.clientX;
+                let y = e.clientY;
+                if (x + menuRect.width > window.innerWidth) x = window.innerWidth - menuRect.width - 5;
+                if (y + menuRect.height > window.innerHeight) y = window.innerHeight - menuRect.height - 5;
+                if (x < 0) x = 5;
+                if (y < 0) y = 5;
+                contextMenu.style.left = `${x}px`;
+                contextMenu.style.top = `${y}px`;
+
+                contextMenu.querySelectorAll('.has-submenu').forEach(item => {
+                    const submenu = item.querySelector('.submenu');
+                    if (!submenu) return;
+                    item.addEventListener('mouseenter', () => {
+                        contextMenu.querySelectorAll('.submenu').forEach(sm => sm.style.display = 'none');
+                        submenu.style.display = 'block';
+                        submenu.style.left = '100%';
+                        submenu.style.right = 'auto';
+                        submenu.style.top = '-5px';
+                        submenu.style.bottom = 'auto';
+                        const subRect = submenu.getBoundingClientRect();
+                        if (subRect.right > window.innerWidth) {
+                            submenu.style.left = 'auto';
+                            submenu.style.right = '100%';
+                        }
+                        if (subRect.bottom > window.innerHeight) {
+                            submenu.style.top = 'auto';
+                            submenu.style.bottom = '0px';
+                        }
+                    });
+                });
+
+                contextMenu.addEventListener('mouseleave', () => {
+                    contextMenu.querySelectorAll('.submenu').forEach(sm => sm.style.display = 'none');
+                });
             };
             const hideContextMenu = () => { if (contextMenu) contextMenu.remove(); contextMenu = null; };
             const handleContextMenuAction = (action, fileInfo, element) => {
@@ -1001,7 +1019,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 contextMenu.className = 'context-menu';
                 document.body.appendChild(contextMenu);
                 contextMenu.innerHTML = `<div class="context-menu-item" data-action="remove_favorite"><span class="label">お気に入りから削除</span></div>`;
-                positionMenu(contextMenu, e.clientX, e.clientY);
+                const menuRect = contextMenu.getBoundingClientRect();
+                let x = e.clientX;
+                let y = e.clientY;
+                if (x + menuRect.width > window.innerWidth) x = window.innerWidth - menuRect.width - 5;
+                if (y + menuRect.height > window.innerHeight) y = window.innerHeight - menuRect.height - 5;
+                if (x < 0) x = 5;
+                if (y < 0) y = 5;
+                contextMenu.style.left = `${x}px`;
+                contextMenu.style.top = `${y}px`;
             };
             const addFavorite = (path, name) => {
                 if (!favorites.some(fav => fav.path === path)) {
