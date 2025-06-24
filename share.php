@@ -17,7 +17,6 @@ if (!$item_path_req) {
     die('共有するアイテムが指定されていません。');
 }
 
-// ... （getSafePath_Share関数の定義は省略。必要であれば追加してください）
 $item_name = basename($item_path_req);
 
 $stmt_get = $db->prepare("SELECT * FROM shares WHERE owner_user_id = :owner_user_id AND source_path = :source_path");
@@ -80,32 +79,45 @@ if ($existing_share) {
           <button id="create-share-btn">リンクを作成・更新</button>
         </div>
     </div>
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const getEl = id => document.getElementById(id);
-            const itemPath = new URLSearchParams(window.location.search).get('item_path');
+<script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const getEl = id => document.getElementById(id);
+        const itemPath = new URLSearchParams(window.location.search).get('item_path');
 
-            const handleAction = (action) => {
-                const formData = {
-                    item_path: itemPath,
-                    share_type: document.querySelector('input[name="share-type"]:checked').value,
-                    password: getEl('share-password').value,
-                    expires_at: getEl('share-expires').value
-                };
-                window.parent.postMessage({ type: 'submitShareForm', action: action, formData: formData }, '*');
+        const handleAction = (action) => {
+            const formData = {
+                item_path: itemPath,
+                share_type: document.querySelector('input[name="share-type"]:checked').value,
+                password: getEl('share-password').value,
+                expires_at: getEl('share-expires').value
             };
+            // 親ウィンドウにフォームデータを送信
+            window.parent.postMessage({ type: 'submitShareForm', action: action, formData: formData }, '*');
+        };
 
-            window.addEventListener('message', (event) => {
-                if (event.data.type === 'shareFormResult') {
-                    const result = event.data.result;
-                    const messageArea = getEl('message-area');
-                    messageArea.textContent = result.message;
+        // 親ウィンドウからのメッセージ（API結果）を待つ
+        window.addEventListener('message', (event) => {
+            // 安全性のため、イベントデータの形式をチェック
+            if (event.data && event.data.type === 'shareFormResult') {
+                const result = event.data.result;
+                const messageArea = getEl('message-area');
+
+                let displayMessage = '';
+
+                if (result && typeof result === 'object') {
+                    displayMessage = result.message;
+                    // もしエラーなのにメッセージが空なら、代替メッセージを表示
+                    if (result.success === false && !displayMessage) {
+                        displayMessage = 'サーバーから不明なエラーが返されました。根本原因の調査が必要です。';
+                    }
+                    
+                    messageArea.textContent = displayMessage;
                     messageArea.className = `message ${result.success ? 'success' : 'error'}`;
                     messageArea.style.display = 'block';
 
                     if (result.success) {
                         if (event.data.action === 'create_share') {
-                            getEl('share-link-input').value = result.url;
+                            getEl('share-link-input').value = result.url || '';
                             getEl('share-password').placeholder = result.password_hash ? 'パスワード設定済み' : '任意';
                             getEl('share-password').value = '';
                             getEl('stop-share-btn').style.display = 'inline-block';
@@ -117,16 +129,24 @@ if ($existing_share) {
                             getEl('share-expires').value = '';
                         }
                     }
+                } else {
+                    // 予期しないデータ形式の場合
+                    displayMessage = '致命的なエラー：サーバーからの応答が不正な形式です。';
+                    messageArea.textContent = displayMessage;
+                    messageArea.className = 'message error';
+                    messageArea.style.display = 'block';
+                    console.error('Received unexpected data format:', event.data);
                 }
-            });
-
-            getEl('create-share-btn').addEventListener('click', () => handleAction('create_share'));
-            getEl('stop-share-btn').addEventListener('click', () => {
-                if (confirm('この共有を停止しますか？')) {
-                    handleAction('stop_share');
-                }
-            });
+            }
         });
-    </script>
+
+        getEl('create-share-btn').addEventListener('click', () => handleAction('create_share'));
+        getEl('stop-share-btn').addEventListener('click', () => {
+            if (confirm('この共有を停止しますか？')) {
+                handleAction('stop_share');
+            }
+        });
+    });
+</script>
 </body>
 </html>

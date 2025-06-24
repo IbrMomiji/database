@@ -62,7 +62,7 @@ class Database
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (owner_user_id) REFERENCES users (id) ON DELETE CASCADE
         );");
-
+/*
         $this->pdo->exec("CREATE TABLE IF NOT EXISTS share_recipients (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             share_id INTEGER NOT NULL,
@@ -71,6 +71,7 @@ class Database
             FOREIGN KEY (recipient_user_id) REFERENCES users (id) ON DELETE CASCADE,
             UNIQUE (share_id, recipient_user_id)
         );");
+*/
     }
 
     private function __clone() {}
