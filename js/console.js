@@ -40,6 +40,36 @@ export class Console {
         });
     }
 
+    handleExternalKey(e) {
+        if (e.key === 'Enter') {
+            this._onCommandSubmit(e);
+            return;
+        }
+
+        const input = this.inputEl;
+
+        if (e.key === 'Backspace') {
+            const start = input.selectionStart;
+            const end = input.selectionEnd;
+            if (start === end && start > 0) {
+                input.value = input.value.substring(0, start - 1) + input.value.substring(end);
+                input.selectionStart = input.selectionEnd = start - 1;
+            } else if (start !== end) {
+                input.value = input.value.substring(0, start) + input.value.substring(end);
+                input.selectionStart = input.selectionEnd = start;
+            }
+        } else if (e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+            const start = input.selectionStart;
+            const end = input.selectionEnd;
+            const text = input.value;
+            input.value = text.slice(0, start) + e.key + text.slice(end);
+            input.selectionStart = input.selectionEnd = start + 1;
+        }
+        
+        this.focus();
+        this._scrollToBottom();
+    }
+
     async _onCommandSubmit(e) {
         if (e.key !== 'Enter' || e.isComposing) return;
         e.preventDefault();
