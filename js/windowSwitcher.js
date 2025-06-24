@@ -2,12 +2,15 @@ export class WindowSwitcher {
     constructor(windowManager) {
         this.windowManager = windowManager;
         this.switcherEl = document.getElementById('window-switcher');
-        this.windowsContainer = this.switcherEl.querySelector('.windows-container');
+        this.switcherEl.classList.add('window-switcher-overlay');
+        this.switcherEl.innerHTML = '';
+        this.windowsListEl = document.createElement('ul');
+        this.windowsListEl.id = 'window-switcher-list';
+        this.switcherEl.appendChild(this.windowsListEl);
         this.windows = [];
         this.selectedIndex = 0;
         this.isVisible = false;
         this.isAltHeld = false;
-
         this.boundHandleKeyDown = this.handleKeyDown.bind(this);
         this.boundHandleKeyUp = this.handleKeyUp.bind(this);
     }
@@ -15,12 +18,10 @@ export class WindowSwitcher {
     show() {
         this.updateWindowList();
         if (this.windows.length === 0) return;
-
         this.selectedIndex = this.windows.length > 1 ? 1 : 0;
         this.highlightSelection();
         this.switcherEl.style.display = 'flex';
         this.isVisible = true;
-
         window.addEventListener('keydown', this.boundHandleKeyDown, true);
         window.addEventListener('keyup', this.boundHandleKeyUp, true);
     }
@@ -34,29 +35,52 @@ export class WindowSwitcher {
     }
 
     updateWindowList() {
-        this.windowsContainer.innerHTML = '';
+        this.windowsListEl.innerHTML = '';
         this.windows = [];
-        
         const zOrderedIds = [...this.windowManager.zOrder].reverse();
 
         zOrderedIds.forEach(id => {
             const winData = this.windowManager.windows.get(id);
-            if (winData && winData.state !== 'minimized') {
-                const winEl = document.createElement('div');
-                winEl.className = 'window-preview';
-                winEl.id = winData.id;
-                
-                const iconEl = winData.el.querySelector('.title-bar-icon')?.cloneNode(true) || document.createElement('div');
-                iconEl.className = 'icon';
-                
-                const titleEl = document.createElement('span');
+            if (winData && winData.state !== 'minimized' && winData.el) {
+                const winItemEl = document.createElement('li');
+                winItemEl.className = 'window-switcher-item';
+                winItemEl.dataset.windowId = winData.id;
+
+                const thumbnailContainer = document.createElement('div');
+                thumbnailContainer.className = 'thumbnail';
+
+                const windowClone = winData.el.cloneNode(true);
+                windowClone.className = 'window-clone';
+                windowClone.removeAttribute('id');
+                windowClone.classList.remove('is-active');
+
+                const thumbnailWidth = 184;
+                const thumbnailHeight = 110;
+                const windowRect = winData.el.getBoundingClientRect();
+
+                if (windowRect.width > 0 && windowRect.height > 0) {
+                    const scaleX = thumbnailWidth / windowRect.width;
+                    const scaleY = thumbnailHeight / windowRect.height;
+                    const scale = Math.min(scaleX, scaleY);
+                    const scaledWidth = windowRect.width * scale;
+                    const scaledHeight = windowRect.height * scale;
+                    const offsetX = (thumbnailWidth - scaledWidth) / 2;
+                    const offsetY = (thumbnailHeight - scaledHeight) / 2;
+
+                    windowClone.style.transform = `scale(${scale})`;
+                    windowClone.style.top = `${offsetY}px`;
+                    windowClone.style.left = `${offsetX}px`;
+                }
+
+                const titleEl = document.createElement('div');
                 titleEl.className = 'title';
                 titleEl.textContent = winData.el.querySelector('.window-title')?.textContent || winData.type;
 
-                winEl.appendChild(iconEl);
-                winEl.appendChild(titleEl);
-                this.windowsContainer.appendChild(winEl);
-                this.windows.push(winEl);
+                thumbnailContainer.appendChild(windowClone);
+                winItemEl.appendChild(thumbnailContainer);
+                winItemEl.appendChild(titleEl);
+                this.windowsListEl.appendChild(winItemEl);
+                this.windows.push(winItemEl);
             }
         });
     }
@@ -71,11 +95,14 @@ export class WindowSwitcher {
         this.windows.forEach((el, index) => {
             el.classList.toggle('selected', index === this.selectedIndex);
         });
+        const selectedEl = this.windows[this.selectedIndex];
+        if (selectedEl) {
+            selectedEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
     }
 
     handleKeyDown(e) {
         if (!this.isVisible) return;
-        
         if (e.key === 'Tab' || (this.isAltHeld && e.key.toLowerCase() === 'w')) {
             e.preventDefault();
             e.stopPropagation();
@@ -90,8 +117,8 @@ export class WindowSwitcher {
             e.preventDefault();
             this.boundHandleKeyUp({ key: 'Alt', preventDefault: () => {} });
         } else if (e.key === 'Escape') {
-             e.preventDefault();
-             this.hide();
+            e.preventDefault();
+            this.hide();
         }
     }
 
@@ -101,7 +128,7 @@ export class WindowSwitcher {
             if (this.isVisible) {
                 const selectedWindowElement = this.windows[this.selectedIndex];
                 if (selectedWindowElement) {
-                    const windowId = selectedWindowElement.id;
+                    const windowId = selectedWindowElement.dataset.windowId;
                     this.windowManager.focus(windowId);
                 }
                 this.hide();
