@@ -11,6 +11,8 @@ export class Console {
         this.inputLineEl = el.querySelector('.input-line');
         this.consoleBody = el.querySelector('.console-body');
         this.privacyManager = new PrivacyPolicyManager(this);
+        
+        this.isProcessing = false;
 
         this.el.dataset.defaultPrompt = options.prompt || 'database&gt; ';
         this.outputEl.innerHTML = options.history ? options.history.join('') : '';
@@ -74,15 +76,21 @@ export class Console {
         if (e.key !== 'Enter' || e.isComposing) return;
         e.preventDefault();
 
+        if (this.isProcessing) {
+            return;
+        }
+
         const command = this.inputEl.value.trim();
         const currentPromptText = this.promptEl.textContent;
         const isPassword = this.inputEl.type === 'password';
 
         this.inputEl.value = '';
         this.inputEl.disabled = true;
+        this.isProcessing = true;
         
+        let data;
         try {
-            const data = await postCommand(command, currentPromptText);
+            data = await postCommand(command, currentPromptText);
 
             if (this.el.dataset.isInteractive) {
                 let echoText = this._escapeHtml(currentPromptText);
@@ -95,11 +103,16 @@ export class Console {
             await this._handleResponse(data);
         } catch (error) {
             this.outputEl.innerHTML += `<div class="error">クライアントエラー: ${error.message}</div>`;
-            this._resetToDefaultPrompt();
+            if (!data || !data.interactive_final) {
+                this._resetToDefaultPrompt();
+            }
         } finally {
-            this.inputEl.disabled = false;
-            this._scrollToBottom();
-            this.focus();
+            setTimeout(() => {
+                this.inputEl.disabled = false;
+                this._scrollToBottom();
+                this.focus();
+                this.isProcessing = false;
+            }, 0);
         }
     }
     
@@ -142,6 +155,9 @@ export class Console {
                             } else {
                                 throw new Error("起動するアプリケーションが指定されていません。");
                             }
+                            break;
+                        case 'close_window':
+                            this.windowManager.closeWindow(this.el.id);
                             break;
                         default:
                             console.warn('不明なアクションタイプです:', data.action.type);
