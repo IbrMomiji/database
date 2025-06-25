@@ -80,7 +80,7 @@ $initialState = $auth->getInitialState();
     </template>
     
     <template id="event_viewer-window-template">
-        <div class="window-container event-viewer-window">
+        <div class="window-container event-viewer-window light-theme" data-width="800" data-height="600">
             <div class="resizer top"></div><div class="resizer right"></div><div class="resizer bottom"></div><div class="resizer left"></div><div class="resizer top-left"></div><div class="resizer top-right"></div><div class="resizer bottom-left"></div><div class="resizer bottom-right"></div>
             <div class="title-bar"><div class="title-bar-text"><span class="title-bar-icon icon-event-viewer"></span><span class="window-title">イベント ビューアー</span></div><div class="window-controls"><span class="minimize-btn">_</span><span class="maximize-btn">&#10065;</span><span class="close-btn">X</span></div></div>
             <iframe src="about:blank" class="window-content-frame" name="event-viewer-iframe-<?php echo uniqid(); ?>"></iframe>

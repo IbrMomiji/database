@@ -75,10 +75,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             --text-secondary-color: #666666;
             --selection-bg: #cce8ff;
             --selection-border: #99d1ff;
-            --header-bg: #f0f0f0;
+            --header-bg: #f5f5f5;
             --error-color: #d93025;
             --warning-color: #fbbc04;
             --info-color: #4285f4;
+            --scrollbar-track-color: #f1f1f1;
+            --scrollbar-thumb-color: #c1c1c1;
+            --scrollbar-thumb-hover-color: #a8a8a8;
         }
         html, body {
             margin: 0;
@@ -91,6 +94,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: var(--text-color);
             font-size: 13px;
         }
+        ::-webkit-scrollbar {
+            width: 12px;
+            height: 12px;
+        }
+        ::-webkit-scrollbar-track {
+            background: var(--scrollbar-track-color);
+        }
+        ::-webkit-scrollbar-thumb {
+            background-color: var(--scrollbar-thumb-color);
+            border-radius: 6px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background-color: var(--scrollbar-thumb-hover-color);
+        }
         .event-viewer-container {
             display: flex;
             height: 100%;
@@ -98,7 +115,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             box-sizing: border-box;
         }
         .left-pane {
-            width: 250px;
+            width: 220px;
+            min-width: 150px;
             height: 100%;
             border-right: 1px solid var(--border-color);
             background-color: var(--bg-pane);
@@ -118,7 +136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             gap: 6px;
         }
         .tree-item:hover {
-            background-color: #e6e6e6;
+            background-color: #e9e9e9;
         }
         .tree-item.active {
             background-color: var(--selection-bg);
@@ -128,6 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         .tree-item-icon {
             width: 16px;
             height: 16px;
+            flex-shrink: 0;
         }
         .main-content {
             flex-grow: 1;
@@ -145,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         .log-list-container {
             height: 60%;
-            overflow-y: auto;
+            overflow: auto;
             border-bottom: 1px solid var(--border-color);
         }
         .splitter {
@@ -154,6 +173,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cursor: ns-resize;
             border-top: 1px solid var(--border-color);
             border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
         }
         .log-details-pane {
             height: 40%;
@@ -190,9 +210,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             background-color: #f5f5f5;
         }
         .log-table tr.selected {
-            background-color: var(--selection-bg);
+            background-color: var(--selection-bg) !important;
         }
-        .log-table .col-level { width: 80px; }
+        .log-table .col-level { width: 90px; }
         .log-table .col-datetime { width: 150px; }
         .log-table .col-message { width: auto; }
         .level-cell {
@@ -224,6 +244,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </style>
 </head>
 <body>
+
     <div class="event-viewer-container">
         <div class="left-pane" id="left-pane"></div>
         <div class="main-content">
@@ -245,6 +266,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
         </div>
     </div>
+
 <script>
 document.addEventListener('DOMContentLoaded', () => {
     const leftPane = document.getElementById('left-pane');
@@ -304,9 +326,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const renderLogs = (logs) => {
         logListBody.innerHTML = '';
-        logDetailsPane.innerHTML = 'ログエントリを選択して詳細を表示します。';
+        logDetailsPane.innerHTML = '<div style="padding:10px; color:#666;">ログエントリを選択して詳細を表示します。</div>';
         if (!logs || logs.length === 0) {
-             logListBody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 20px;">このログにはエントリがありません。</td></tr>';
+             logListBody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 20px; color:#666;">このログにはエントリがありません。</td></tr>';
              return;
         }
 
@@ -357,6 +379,12 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const initialize = async () => {
+        // 親ウィンドウのタイトルバーを白にするよう通知
+        try {
+            window.parent.postMessage({ type: 'setWindowStyle', style: 'light' }, '*');
+        } catch(e) {
+            console.warn("Could not post message to parent window to set style.");
+        }
         const response = await apiCall('get_log_types');
         if (response.success) {
             renderLogTypes(response.log_types);
@@ -364,7 +392,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const escapeHtml = (unsafe) => {
-        if (typeof unsafe !== 'string') return '';
+        if (typeof unsafe !== 'string') {
+            if (unsafe === null || unsafe === undefined) return '';
+            try {
+                return String(unsafe);
+            } catch(e) {
+                return '';
+            }
+        }
         return unsafe
              .replace(/&/g, "&amp;")
              .replace(/</g, "&lt;")
