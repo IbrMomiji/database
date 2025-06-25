@@ -26,6 +26,14 @@ spl_autoload_register(function ($class_name) {
         return;
     }
 
+    if ($class_name === 'Logger') {
+        $logger_file = __DIR__ . '/Logger.php';
+        if (file_exists($logger_file)) {
+            require_once $logger_file;
+            return;
+        }
+    }
+
     if ($class_name === 'ICommand') {
         $iface_file = __DIR__ . '/commands/ICommand.php';
         if (file_exists($iface_file)) {

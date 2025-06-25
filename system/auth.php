@@ -104,6 +104,9 @@ class Auth
             mkdir($userDir . '/.settings', 0775, true);
             
             $this->pdo->commit();
+            
+            Logger::log($uuid, 'auth', 'アカウントが作成されました。', Logger::INFO, ['username' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR']]);
+
             return ['success' => true, 'message' => 'アカウントが正常に作成されました。'."'login'".'コマンドでログインしてください。'];
 
         } catch (Exception $e) {
@@ -121,13 +124,22 @@ class Auth
             $stmt->execute([$username]);
             $user = $stmt->fetch();
 
-            if ($user && password_verify($password, $user['password'])) {
-                $_SESSION['user_id'] = $user['id'];
-                $_SESSION['username'] = $user['username'];
-                $_SESSION['user_uuid'] = $user['uuid'];
-                return ['success' => true, 'message' => "ようこそ、" . htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') . "さん！"];
+            if ($user) {
+                if (password_verify($password, $user['password'])) {
+                    $_SESSION['user_id'] = $user['id'];
+                    $_SESSION['username'] = $user['username'];
+                    $_SESSION['user_uuid'] = $user['uuid'];
+                    
+                    Logger::log($user['uuid'], 'auth', 'ログインに成功しました。', Logger::INFO, ['username' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR']]);
+                    
+                    return ['success' => true, 'message' => "ようこそ、" . htmlspecialchars($user['username'], ENT_QUOTES, 'UTF-8') . "さん！"];
+                } else {
+                    Logger::log($user['uuid'], 'auth', 'パスワードの入力ミスにより、ログインに失敗しました。', Logger::WARNING, ['username' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR']]);
+                    
+                    return ['success' => false, 'message' => "ログイン失敗: ユーザー名またはパスワードが間違っています。"];
+                }
             } else {
-                return ['success' => false, 'message' => "ログイン失敗: ユーザー名またはパスワードが間違っています。"];
+                 return ['success' => false, 'message' => "ログイン失敗: ユーザー名またはパスワードが間違っています。"];
             }
         } catch (PDOException $e) {
             return ['success' => false, 'message' => 'データベースエラーが発生しました。'];
@@ -137,6 +149,10 @@ class Auth
     public function logout()
     {
         if (isset($_SESSION['user_id'])) {
+            $uuid = $_SESSION['user_uuid'];
+            $username = $_SESSION['username'];
+            Logger::log($uuid, 'auth', 'ログアウトしました。', Logger::INFO, ['username' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR']]);
+            
             session_unset();
             session_destroy();
             return "ログアウトしました。";
@@ -150,6 +166,9 @@ class Auth
         if (!isset($_SESSION['user_id'])) {
             return ['success' => false, 'message' => "エラー: ログインしていません。"];
         }
+
+        $uuid = $_SESSION['user_uuid'];
+        $oldUsername = $_SESSION['username'];
 
         try {
             $stmt = $this->pdo->prepare("SELECT password FROM users WHERE id = :user_id");
@@ -168,7 +187,7 @@ class Auth
             return ['success' => false, 'message' => $usernameValidation];
         }
 
-        if (strtolower($newUsername) === strtolower($_SESSION['username'])) {
+        if (strtolower($newUsername) === strtolower($oldUsername)) {
             return ['success' => false, 'message' => 'エラー: 新しいユーザー名が現在のユーザー名と同じです。'];
         }
 
@@ -186,6 +205,8 @@ class Auth
             ]);
 
             $_SESSION['username'] = $newUsername;
+            
+            Logger::log($uuid, 'auth', 'ユーザー名が変更されました。', Logger::INFO, ['old_username' => $oldUsername, 'new_username' => $newUsername, 'ip_address' => $_SERVER['REMOTE_ADDR']]);
 
             return [
                 'success' => true, 
@@ -203,9 +224,11 @@ class Auth
         if (!isset($_SESSION['user_id'])) {
             return ['success' => false, 'message' => "エラー: ログインしていません。"];
         }
+        
+        $uuid = $_SESSION['user_uuid'];
+        $username = $_SESSION['username'];
 
         try {
-            $username = $_SESSION['username'];
             $stmt = $this->pdo->prepare("SELECT password FROM users WHERE username = :username");
             $stmt->execute([':username' => $username]);
             $user = $stmt->fetch();
@@ -225,6 +248,8 @@ class Auth
                 ':password' => $hashedPassword,
                 ':username' => $username
             ]);
+            
+            Logger::log($uuid, 'auth', 'パスワードが変更されました。', Logger::INFO, ['username' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR']]);
 
             return ['success' => true, 'message' => 'パスワードが変更されました。'];
 
@@ -251,6 +276,8 @@ class Auth
                 return ['success' => false, 'message' => 'パスワードが間違っています。アカウントを削除できませんでした。'];
             }
             
+            Logger::log($uuid, 'auth', 'アカウントが削除されます。', Logger::WARNING, ['username' => $username, 'ip_address' => $_SERVER['REMOTE_ADDR']]);
+
             $this->pdo->beginTransaction();
 
             $userDir = USER_DIR_PATH . '/' . $uuid;
@@ -262,7 +289,7 @@ class Auth
             $stmt->execute([':username' => $username]);
 
             $this->pdo->commit();
-
+            
             return ['success' => true, 'message' => 'アカウントを削除しました。'];
 
         } catch (Exception $e) {

@@ -43,6 +43,8 @@ class WindowManager {
                 iframe.src = `system/application/notepad.php?${srcParams.toString()}`;
             } else if (type === 'explorer') {
                 iframe.src = `system/application/explorer.php`;
+            } else if (type === 'event_viewer') {
+                iframe.src = `system/application/event_viewer.php`;
             } else if (type === 'file_explorer_dialog') {
                 srcParams.set('source', options.sourceWindowId);
                 srcParams.set('mode', options.mode);

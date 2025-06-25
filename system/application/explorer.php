@@ -143,7 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $path = $_POST['path'] ?? '/';
 
     try {
-        if (!in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites'])) {
+        if (!in_array($action, ['get_usage', 'search', 'get_favorites', 'save_favorites', 'create_share', 'stop_share'])) {
             $safe_path = getSafePath($user_dir, $path);
             if ($safe_path === false) {
                 throw new Exception('無効なパスです。');
@@ -196,6 +196,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $errors = [];
+                $moved_items_log = [];
                 foreach ($items_to_move as $item) {
                     $source_path = getSafePath($user_dir, $item['path']);
                     if ($source_path === false || !file_exists($source_path)) {
@@ -223,9 +224,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
 
-                    if (!rename($source_path, $new_path)) {
+                    if (rename($source_path, $new_path)) {
+                        $moved_items_log[] = ['from' => $item['path'], 'to' => $destination_path . '/' . $item['name']];
+                    } else {
                         $errors[] = "'{$item['name']}' の移動に失敗しました。";
                     }
+                }
+
+                if (!empty($moved_items_log)) {
+                     Logger::log($user_uuid, 'file', count($moved_items_log) . '個のアイテムを移動しました。', Logger::INFO, ['items' => $moved_items_log]);
                 }
 
                 if (!empty($errors)) {
@@ -261,14 +268,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (empty($_FILES['files']['name'][0])) throw new Exception('アップロードされたファイルがありません。');
                 $total_size = array_sum($_FILES['files']['size']);
                 if (getDirectorySize($user_dir) + $total_size > MAX_STORAGE_BYTES) throw new Exception('ストレージ容量不足です。');
+                
                 $relative_paths = isset($_POST['relative_paths']) ? json_decode($_POST['relative_paths'], true) : [];
+                $uploaded_files_log = [];
+
                 foreach ($_FILES['files']['tmp_name'] as $index => $tmp_name) {
                     $file_name = count($relative_paths) > 0 ? $relative_paths[$index] : $_FILES['files']['name'][$index];
                     $target_path = $safe_path . DIRECTORY_SEPARATOR . $file_name;
                     $dir_path = dirname($target_path);
                     if (!is_dir($dir_path)) mkdir($dir_path, 0777, true);
-                    if (!move_uploaded_file($tmp_name, $target_path)) throw new Exception("{$file_name} のアップロードに失敗しました。");
+                    if (!move_uploaded_file($tmp_name, $target_path)) {
+                        throw new Exception("{$file_name} のアップロードに失敗しました。");
+                    }
+                    $uploaded_files_log[] = $path . '/' . $file_name;
                 }
+                
+                Logger::log($user_uuid, 'file', count($uploaded_files_log) . '個のファイルをアップロードしました。', Logger::INFO, ['files' => $uploaded_files_log]);
                 echo json_encode(['success' => true, 'message' => 'アップロードが完了しました。']);
                 break;
 
@@ -278,6 +293,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $new_folder_path = $safe_path . DIRECTORY_SEPARATOR . $folder_name;
                 if (file_exists($new_folder_path)) throw new Exception('同じ名前のアイテムが存在します。');
                 if (!mkdir($new_folder_path, 0777, true)) throw new Exception('フォルダの作成に失敗しました。');
+                
+                $log_path = $path === '/' ? '/' . $folder_name : $path . '/' . $folder_name;
+                Logger::log($user_uuid, 'file', 'フォルダを作成しました。', Logger::INFO, ['path' => $log_path]);
+                
                 echo json_encode(['success' => true, 'message' => 'フォルダを作成しました。']);
                 break;
 
@@ -287,36 +306,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $new_file_path = $safe_path . DIRECTORY_SEPARATOR . $file_name;
                 if (file_exists($new_file_path)) throw new Exception('同じ名前のファイルが既に存在します。');
                 if (file_put_contents($new_file_path, '') === false) throw new Exception('ファイルの作成に失敗しました。');
+                
+                $log_path = $path === '/' ? '/' . $file_name : $path . '/' . $file_name;
+                Logger::log($user_uuid, 'file', 'ファイルを作成しました。', Logger::INFO, ['path' => $log_path]);
+
                 echo json_encode(['success' => true, 'message' => 'ファイルを作成しました。']);
                 break;
 
             case 'rename':
-                $old_name_path = $_POST['item_path'] ?? '';
+                $old_name_path_rel = $_POST['item_path'] ?? '';
                 $new_name = $_POST['new_name'] ?? '';
-                if (empty($old_name_path) || empty($new_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $new_name)) throw new Exception('無効なファイル名です。');
-                $old_path = getSafePath($user_dir, $old_name_path);
+                if (empty($old_name_path_rel) || empty($new_name) || preg_match('/[\\\\\/:\*\?"<>|]/', $new_name)) throw new Exception('無効なファイル名です。');
+                
+                $old_path = getSafePath($user_dir, $old_name_path_rel);
                 if (basename($old_path) === SETTINGS_DIR) throw new Exception('システムフォルダの名前は変更できません。');
+                
                 $new_path = dirname($old_path) . DIRECTORY_SEPARATOR . $new_name;
+                
                 if ($old_path === false) throw new Exception('無効なパスです。');
                 if (!file_exists($old_path)) throw new Exception('元のファイルが見つかりません。');
                 if (file_exists($new_path)) throw new Exception('同じ名前のファイルが既に存在します。');
                 if (!rename($old_path, $new_path)) throw new Exception('名前の変更に失敗しました。');
+
+                $new_name_path_rel = dirname($old_name_path_rel) . '/' . $new_name;
+                Logger::log($user_uuid, 'file', '名前を変更しました。', Logger::INFO, ['from' => $old_name_path_rel, 'to' => $new_name_path_rel]);
+
                 echo json_encode(['success' => true, 'message' => '名前を変更しました。']);
                 break;
 
             case 'delete':
                 $items = json_decode($_POST['items'] ?? '[]', true);
                 if (empty($items)) throw new Exception('削除するアイテムが指定されていません。');
+                
+                $deleted_items_log = [];
                 foreach ($items as $item) {
                     $item_path_full = getSafePath($user_dir, $item['path']);
                     if (basename($item_path_full) === SETTINGS_DIR) continue;
                     if (!$item_path_full || !file_exists($item_path_full)) continue;
+                    
                     if (is_dir($item_path_full)) {
                         if (!deleteDirectoryRecursively($item_path_full)) throw new Exception("ディレクトリ '{$item['name']}' の削除に失敗しました。");
                     } else {
                         if (!unlink($item_path_full)) throw new Exception("ファイル '{$item['name']}' の削除に失敗しました。");
                     }
+                    $deleted_items_log[] = $item['path'];
                 }
+
+                if (!empty($deleted_items_log)) {
+                     Logger::log($user_uuid, 'file', count($deleted_items_log) . '個のアイテムを削除しました。', Logger::WARNING, ['items' => $deleted_items_log]);
+                }
+
                 echo json_encode(['success' => true, 'message' => 'アイテムを削除しました。']);
                 break;
 
@@ -339,9 +378,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 file_put_contents($fav_file, json_encode($favorites, JSON_PRETTY_PRINT));
                 echo json_encode(['success' => true, 'message' => 'お気に入りを保存しました。']);
                 break;
+            
+            case 'create_share':
+                $item_path = $_POST['item_path'] ?? '';
+                if (empty($item_path)) throw new Exception('共有するアイテムが指定されていません。');
+
+                $safe_item_path = getSafePath($user_dir, $item_path);
+                if ($safe_item_path === false || !file_exists($safe_item_path)) {
+                    throw new Exception('共有するアイテムが見つかりません。');
+                }
+
+                $share_id = bin2hex(random_bytes(16));
+                $password = $_POST['password'] ?? null;
+                $password_hash = $password ? password_hash($password, PASSWORD_DEFAULT) : null;
+                $expires_at = !empty($_POST['expires_at']) ? date('Y-m-d H:i:s', strtotime($_POST['expires_at'])) : null;
+
+                $stmt_check = $db->prepare("SELECT share_id FROM shares WHERE owner_user_id = :owner_user_id AND source_path = :source_path");
+                $stmt_check->execute([':owner_user_id' => $_SESSION['user_id'], ':source_path' => $item_path]);
+                $existing = $stmt_check->fetchColumn();
+
+                if ($existing) {
+                    $stmt_update = $db->prepare("UPDATE shares SET password_hash = :password_hash, expires_at = :expires_at WHERE share_id = :share_id");
+                    $stmt_update->execute([':password_hash' => $password_hash, ':expires_at' => $expires_at, ':share_id' => $existing]);
+                    $share_id_to_use = $existing;
+                } else {
+                    $stmt_insert = $db->prepare("INSERT INTO shares (share_id, owner_user_id, source_path, password_hash, expires_at) VALUES (:share_id, :owner_user_id, :source_path, :password_hash, :expires_at)");
+                    $stmt_insert->execute([':share_id' => $share_id, ':owner_user_id' => $_SESSION['user_id'], ':source_path' => $item_path, ':password_hash' => $password_hash, ':expires_at' => $expires_at]);
+                    $share_id_to_use = $share_id;
+                }
+                
+                $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
+                $host = $_SERVER['HTTP_HOST'];
+                $base_uri = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
+                $share_url = $protocol . $host . $base_uri . "/share.php?id=" . $share_id_to_use;
+                
+                Logger::log($user_uuid, 'file', 'アイテムを共有しました。', Logger::INFO, ['path' => $item_path]);
+
+                echo json_encode(['success' => true, 'message' => '共有リンクを作成・更新しました。', 'url' => $share_url, 'password_hash' => !empty($password_hash)]);
+                break;
+            
+            case 'stop_share':
+                $item_path_stop = $_POST['item_path'] ?? '';
+                 if (empty($item_path_stop)) throw new Exception('共有を停止するアイテムが指定されていません。');
+                
+                $stmt = $db->prepare("DELETE FROM shares WHERE owner_user_id = :owner_user_id AND source_path = :source_path");
+                $stmt->execute([':owner_user_id' => $_SESSION['user_id'], ':source_path' => $item_path_stop]);
+
+                Logger::log($user_uuid, 'file', 'アイテムの共有を停止しました。', Logger::INFO, ['path' => $item_path_stop]);
+
+                echo json_encode(['success' => true, 'message' => '共有を停止しました。']);
+                break;
+
         }
     } catch (Exception $e) {
         http_response_code(500);
+        Logger::log($user_uuid, 'file', 'ファイル操作エラー: ' . $e->getMessage(), Logger::ERROR, ['action' => $action, 'path' => $path]);
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
     }
     exit;
@@ -353,6 +444,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         http_response_code(404);
         die('File not found.');
     }
+    Logger::log($user_uuid, 'file', 'ファイルをダウンロードしました。', Logger::INFO, ['path' => $_GET['file']]);
     header('Content-Description: File Transfer');
     header('Content-Type: application/octet-stream');
     header('Content-Disposition: attachment; filename="' . basename($file_to_download) . '"');
@@ -1173,8 +1265,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
                 'rename': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83zM3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM5.92 19H5v-.92l9.06-9.06.92.92L5.92 19z"/></svg>',
                 'delete': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>',
                 'new-folder': '<svg fill="currentColor" viewBox="0 0 24 24"><path d="M20 6h-8l-2-2H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm0 12H4V6h5.17l2 2H20v10zm-8-4h2v2h-2v-2zm-4 0h2v2H8v-2zm8 0h2v2h-2v-2z"/></svg>',
-                'upload-file': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg>',
-                'upload-folder': '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M11 5c0-1.1.9-2 2-2h6c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H3c-1.1 0-2-.9-2-2V7c0-1.1.9-2 2-2h5l2 2h3z"/></svg>',
+                'upload-file': '<svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zm0-10h4v6h6v-6h4l-7-7-7 7z"/></svg>',
+                'upload-folder': '<svg xmlns="[http://www.w3.org/2000/svg](http://www.w3.org/2000/svg)" viewBox="0 0 24 24" fill="currentColor"><path d="M11 5c0-1.1.9-2 2-2h6c1.1 0 2 .9 2 2v14c0 1.1-.9 2-2 2H3c-1.1 0-2-.9-2-2V7c0-1.1.9-2 2-2h5l2 2h3z"/></svg>',
                 'folder': '<svg fill="#FFCA28" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>',
                 'file': '<svg fill="#E0E0E0" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zM13 9V3.5L18.5 9H13z"/></svg>',
                 'user-folder': '<svg fill="#FFCA28" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>',
@@ -1953,4 +2045,5 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['act
         });
     </script>
 </body>
+
 </html>
