@@ -1,0 +1,2 @@
+{"timestamp":"2025-06-25 18:45:26","level":"INFO","message":"フォルダを作成しました。","details":{"path":"\/新しいフォルダー"}}
+{"timestamp":"2025-06-25 18:45:56","level":"WARNING","message":"1個のアイテムを削除しました。","details":{"items":["\/新しいフォルダー"]}}
