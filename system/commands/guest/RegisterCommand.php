@@ -23,6 +23,7 @@ class RegisterCommand implements ICommand
                 return [
                     'output' => '登録するユーザー名を入力してください:',
                     'interactive_final' => true,
+                    'prompt_text' => '> '
                 ];
             
             case 'get_username':
@@ -32,6 +33,7 @@ class RegisterCommand implements ICommand
                     'output' => 'パスワードを入力してください:',
                     'input_type' => 'password',
                     'interactive_final' => true,
+                    'prompt_text' => '> '
                 ];
 
             case 'get_password':
@@ -40,7 +42,6 @@ class RegisterCommand implements ICommand
                 return [
                     'output' => "プライバシーポリシーに同意してアカウントを作成します。\nEnterキーでポリシーを表示、Escキーでキャンセルします。",
                     'interactive_final' => true,
-                    'prompt_text' => ''
                 ];
 
             case 'prompt_consent':
