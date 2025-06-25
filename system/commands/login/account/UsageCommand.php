@@ -6,9 +6,9 @@ class UsageCommand implements ICommand
         $usage = $auth->getStorageUsage();
         $used_bytes = $usage['used'];
         $total_bytes = $usage['total'];
-        
+
         $percentage = ($total_bytes > 0) ? ($used_bytes / $total_bytes) * 100 : 0;
-        
+
         $output = "ディスク使用量:\n";
         $output .= "  " . $this->formatBytes($used_bytes) . " / " . $this->formatBytes($total_bytes) . "\n";
         $output .= "  " . $this->createProgressBar($percentage);
@@ -30,7 +30,7 @@ class UsageCommand implements ICommand
     {
         $filled_width = round($width * $percentage / 100);
         $empty_width = $width - $filled_width;
-        
+
         $bar = '[' . str_repeat('=', $filled_width) . str_repeat(' ', $empty_width) . ']';
         return $bar . ' ' . sprintf('%.2f%%', $percentage);
     }
@@ -39,12 +39,12 @@ class UsageCommand implements ICommand
     {
         return [];
     }
-    
+
     public function getDescription(): string
     {
         return "現在のディスク使用量を表示します。";
     }
-    
+
     public function getUsage(): string
     {
         return "usage: usage\n\n説明:\n  現在のユーザーが使用しているディスク容量と、割り当てられている総容量を表示します。";

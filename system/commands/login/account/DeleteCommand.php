@@ -43,7 +43,7 @@ class DeleteCommand implements ICommand
                     return ['output' => 'エラー: ' . $result['message'], 'clear' => false];
                 }
         }
-        
+
         $interactionState = ['mode' => 'account'];
         return ['output' => '不明なエラーが発生しました。', 'clear' => false];
     }

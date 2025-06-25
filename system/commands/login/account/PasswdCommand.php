@@ -35,12 +35,12 @@ class PasswdCommand implements ICommand
                     $interactionState = ['mode' => 'account'];
                     return ['output' => "新しいパスワードが一致しません。やり直してください。", 'clear' => false];
                 }
-                
+
                 $result = $auth->changePassword($interactionState['current_password'], $interactionState['new_password']);
                 $interactionState = ['mode' => 'account'];
                 return ['output' => $result['message'], 'clear' => false];
         }
-        
+
         return ['output' => '', 'clear' => false];
     }
 
