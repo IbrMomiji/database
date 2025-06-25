@@ -250,7 +250,7 @@ $safe_selected_user = $selected_user && preg_match('/^[a-zA-Z0-9_\-]+$/', $selec
     </main>
 
     <footer class="bios-footer">
-        <div><a href="../index.php">メインページに戻る</a></div>
+        <div><a href="../">メインページに戻る</a></div>
         <div><a href="logout.php">ログアウト</a></div>
     </footer>
 </div>
