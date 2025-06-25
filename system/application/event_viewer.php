@@ -379,7 +379,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const initialize = async () => {
-        // 親ウィンドウのタイトルバーを白にするよう通知
         try {
             window.parent.postMessage({ type: 'setWindowStyle', style: 'light' }, '*');
         } catch(e) {

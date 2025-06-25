@@ -9,7 +9,10 @@ class EventvwrCommand implements ICommand
             'action' => [
                 'type' => 'open_app',
                 'app' => 'event_viewer',
-                'options' => []
+                'options' => [
+                    'width' => 800,
+                    'height' => 600
+                ]
             ]
         ];
     }
