@@ -14,8 +14,17 @@ export class PrivacyPolicyManager {
     async show() {
         try {
             const response = await fetch('index.php?action=get_privacy_policy');
-            if (!response.ok) throw new Error('Could not load privacy policy.');
-            this.contentEl.innerHTML = await response.text();
+            if (!response.ok) throw new Error('プライバシーポリシーを読み込めません。');
+            const htmlString = await response.text();
+
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(htmlString, 'text/html');
+            
+            this.contentEl.innerHTML = '';
+            
+            while (doc.body.firstChild) {
+                this.contentEl.appendChild(doc.body.firstChild);
+            }
 
             this.overlay.style.display = 'flex';
             this.contentEl.focus();

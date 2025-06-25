@@ -110,7 +110,8 @@ body {
 
 .explorer-window .title-bar,
 .notepad-window .title-bar,
-.file-explorer-dialog-window .title-bar {
+.file-explorer-dialog-window .title-bar
+.event-viewer-window .title-bar {
     background-color: var(--titlebar-light);
     color: var(--text-light);
     border-bottom: 1px solid #ccc;
