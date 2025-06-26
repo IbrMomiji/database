@@ -1,0 +1,4 @@
+��timestamp�h]3b�level_code�level_name�警告�event_id�]�source�FileDialog�category�ファイル操作�message�Rファイル「新規テキストドキュメント.txt」を削除しました。�details��path�*//新規テキストドキュメント.txt
+��timestamp�h]3��level_code�level_name�情報�event_id�Y�source�FileDialog�category�ファイル操作�message�Bフォルダ「新しいフォルダー」を作成しました。�details��path�/新しいフォルダー
+��timestamp�h]3Īlevel_code�level_name�情報�event_id�Z�source�FileDialog�category�ファイル操作�message�Rファイル「新規テキストドキュメント.txt」を作成しました。�details��path�B/新しいフォルダー/新規テキストドキュメント.txt
+��timestamp�h]3֪level_code�level_name�警告�event_id�\�source�FileDialog�category�ファイル操作�message�Bフォルダ「新しいフォルダー」を削除しました。�details��path�//新しいフォルダー

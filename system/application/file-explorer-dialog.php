@@ -1,10 +1,9 @@
 <?php
-if (session_status() == PHP_SESSION_NONE) {
-    session_start();
-}
+require_once __DIR__ . '/../boot.php';
 
 define('FILEDIALOG_USER_BASE_DIR', __DIR__ . '/../../users');
 define('FILEDIALOG_SETTINGS_DIR', '.settings');
+define('FILEDIALOG_LOGS_DIR', '.logs');
 
 if (!isset($_SESSION['user_id'], $_SESSION['user_uuid'])) {
     http_response_code(403);
@@ -13,6 +12,7 @@ if (!isset($_SESSION['user_id'], $_SESSION['user_uuid'])) {
     exit;
 }
 
+$user_uuid = $_SESSION['user_uuid'];
 $user_dir = FILEDIALOG_USER_BASE_DIR . '/' . $_SESSION['user_uuid'];
 
 function getSafePath_Dialog($baseDir, $path)
@@ -107,8 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                         throw new Exception('ディレクトリの読み込みに失敗しました。');
                     }
                     foreach ($files as $file) {
-                        if ($file === '.' || $file === '..') continue;
-                        if (strpos($file, FILEDIALOG_SETTINGS_DIR) === 0) continue;
+                        if ($file === '.' || $file === '..' || $file === FILEDIALOG_SETTINGS_DIR || $file === FILEDIALOG_LOGS_DIR) continue;
 
                         $item_path = $safe_path . DIRECTORY_SEPARATOR . $file;
                         clearstatcache(true, $item_path);
@@ -132,6 +131,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $new_path = $safe_path . DIRECTORY_SEPARATOR . $name;
                 }
                 if (mkdir($new_path, 0775, true)) {
+                    $log_path = rtrim($path, '/') . '/' . $name;
+                    Logger::log($user_uuid, 7001, 'FileDialog', 'ファイル操作', Logger::INFO, "フォルダ「{$name}」を作成しました。", ['path' => $log_path]);
                     echo json_encode(['success' => true, 'name' => $name]);
                 } else {
                     throw new Exception('フォルダーの作成に失敗しました。');
@@ -146,6 +147,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                     $new_path = $safe_path . DIRECTORY_SEPARATOR . $name;
                 }
                 if (touch($new_path)) {
+                    $log_path = rtrim($path, '/') . '/' . $name;
+                    Logger::log($user_uuid, 7002, 'FileDialog', 'ファイル操作', Logger::INFO, "ファイル「{$name}」を作成しました。", ['path' => $log_path]);
                     echo json_encode(['success' => true, 'name' => $name]);
                 } else {
                     throw new Exception('ファイルの作成に失敗しました。');
@@ -160,6 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
                 if ($old_path && $new_path && file_exists($old_path) && !file_exists($new_path)) {
                     if (rename($old_path, $new_path)) {
+                        Logger::log($user_uuid, 7003, 'FileDialog', 'ファイル操作', Logger::INFO, "「{$old_name}」を「{$new_name}」に名前変更しました。", ['from' => $path . '/' . $old_name, 'to' => $path . '/' . $new_name]);
                         echo json_encode(['success' => true]);
                     } else {
                         throw new Exception('名前の変更に失敗しました。');
@@ -174,12 +178,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
                 if ($item_path && file_exists($item_path)) {
                     if (is_dir($item_path)) {
                         if (deleteDirectoryRecursively_Dialog($item_path)) {
+                            Logger::log($user_uuid, 7004, 'FileDialog', 'ファイル操作', Logger::WARNING, "フォルダ「{$name}」を削除しました。", ['path' => $path . '/' . $name]);
                             echo json_encode(['success' => true]);
                         } else {
                             throw new Exception('ディレクトリの削除に失敗しました。');
                         }
                     } else {
                         if (unlink($item_path)) {
+                            Logger::log($user_uuid, 7005, 'FileDialog', 'ファイル操作', Logger::WARNING, "ファイル「{$name}」を削除しました。", ['path' => $path . '/' . $name]);
                             echo json_encode(['success' => true]);
                         } else {
                             throw new Exception('ファイルの削除に失敗しました。');
@@ -199,7 +205,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 ?>
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
     <meta charset="UTF-8">
     <title>ファイルを開く</title>
@@ -213,32 +218,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             font-size: 13px;
             overflow: hidden;
         }
-
         .dialog-container {
             display: flex;
             flex-direction: column;
             height: 100vh;
         }
-
         .header,
         .footer {
             flex-shrink: 0;
             padding: 12px;
             background: #f0f0f0;
         }
-
         .main-content {
             flex-grow: 1;
             border: 1px solid #999;
             background: white;
             overflow-y: auto;
         }
-
         .file-table {
             width: 100%;
             border-collapse: collapse;
         }
-
         .file-table th {
             background: #f0f0f0;
             text-align: left;
@@ -246,29 +246,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             border-bottom: 1px solid #ccc;
             font-weight: normal;
         }
-
         .file-table td {
             padding: 4px 8px;
             border-bottom: 1px solid #eee;
             cursor: default;
             white-space: nowrap;
         }
-
         .file-table tr.selected td {
             background-color: #0078d7;
             color: white;
         }
-
         .file-table tr:not(.selected):hover td {
             background-color: #e5f3ff;
         }
-
         #path-input {
             width: 100%;
             margin-bottom: 8px;
             box-sizing: border-box;
         }
-
         .footer {
             border-top: 1px solid #ccc;
             display: flex;
@@ -276,20 +271,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             align-items: center;
             gap: 8px;
         }
-
         .footer label {
             white-space: nowrap;
         }
-
         .footer input[type="text"] {
             flex-grow: 1;
         }
-
         .footer .buttons {
             display: flex;
             gap: 8px;
         }
-
         .context-menu {
             position: fixed;
             z-index: 1000;
@@ -300,41 +291,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             box-shadow: 1px 1px 3px rgba(0, 0, 0, 0.2);
             user-select: none;
         }
-
         .context-menu-item {
             padding: 4px 12px;
             cursor: default;
         }
-
         .context-menu-item:hover {
             background: #0078d7;
             color: white;
         }
-
         .context-menu-separator {
             height: 1px;
             background: #ccc;
             margin: 4px 0;
         }
-
         .submenu {
             display: none;
             position: absolute;
             left: 100%;
             top: -3px;
         }
-
         .context-menu-item.has-submenu::after {
             content: '▶';
             float: right;
         }
-
         .context-menu-item:hover>.submenu {
             display: block;
         }
     </style>
 </head>
-
 <body>
     <div class="dialog-container">
         <div class="header">
@@ -660,5 +644,4 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         });
     </script>
 </body>
-
 </html>
