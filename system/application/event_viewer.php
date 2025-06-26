@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 echo json_encode(['success' => true, 'logs' => $logs]);
                 break;
-            
+
             default:
                 throw new Exception('不明なアクションです。');
         }
@@ -62,6 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 ?>
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <title>イベント ビューアー</title>
@@ -83,7 +84,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             --scrollbar-thumb-color: #c1c1c1;
             --scrollbar-thumb-hover-color: #a8a8a8;
         }
-        html, body {
+
+        html,
+        body {
             margin: 0;
             padding: 0;
             width: 100%;
@@ -94,26 +97,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             color: var(--text-color);
             font-size: 13px;
         }
+
         ::-webkit-scrollbar {
             width: 12px;
             height: 12px;
         }
+
         ::-webkit-scrollbar-track {
             background: var(--scrollbar-track-color);
         }
+
         ::-webkit-scrollbar-thumb {
             background-color: var(--scrollbar-thumb-color);
             border-radius: 6px;
         }
+
         ::-webkit-scrollbar-thumb:hover {
             background-color: var(--scrollbar-thumb-hover-color);
         }
+
         .event-viewer-container {
             display: flex;
             height: 100%;
             width: 100%;
             box-sizing: border-box;
         }
+
         .left-pane {
             width: 220px;
             min-width: 150px;
@@ -126,6 +135,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             user-select: none;
             flex-shrink: 0;
         }
+
         .tree-item {
             padding: 5px 8px;
             cursor: pointer;
@@ -135,19 +145,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             align-items: center;
             gap: 6px;
         }
+
         .tree-item:hover {
             background-color: #e9e9e9;
         }
+
         .tree-item.active {
             background-color: var(--selection-bg);
             border: 1px solid var(--selection-border);
             padding: 4px 7px;
         }
+
         .tree-item-icon {
             width: 16px;
             height: 16px;
             flex-shrink: 0;
         }
+
         .main-content {
             flex-grow: 1;
             display: flex;
@@ -155,6 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             height: 100%;
             overflow: hidden;
         }
+
         .center-pane-splitter {
             flex-grow: 1;
             display: flex;
@@ -162,11 +177,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             height: 100%;
             overflow: hidden;
         }
+
         .log-list-container {
             height: 60%;
             overflow: auto;
             border-bottom: 1px solid var(--border-color);
         }
+
         .splitter {
             height: 6px;
             background: var(--bg-pane);
@@ -175,6 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-bottom: 1px solid var(--border-color);
             flex-shrink: 0;
         }
+
         .log-details-pane {
             height: 40%;
             overflow-y: auto;
@@ -184,10 +202,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-family: 'Consolas', 'Monaco', monospace;
             font-size: 12px;
         }
+
         .log-table {
             width: 100%;
             border-collapse: collapse;
         }
+
         .log-table th {
             position: sticky;
             top: 0;
@@ -197,6 +217,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             border-bottom: 1px solid var(--border-color);
             font-weight: normal;
         }
+
         .log-table td {
             padding: 6px 8px;
             border-bottom: 1px solid #e0e0e0;
@@ -206,33 +227,49 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             max-width: 0;
             cursor: default;
         }
+
         .log-table tr:hover {
             background-color: #f5f5f5;
         }
+
         .log-table tr.selected {
             background-color: var(--selection-bg) !important;
         }
-        .log-table .col-level { width: 90px; }
-        .log-table .col-datetime { width: 150px; }
-        .log-table .col-message { width: auto; }
+
+        .log-table .col-level {
+            width: 90px;
+        }
+
+        .log-table .col-datetime {
+            width: 150px;
+        }
+
+        .log-table .col-message {
+            width: auto;
+        }
+
         .level-cell {
             display: flex;
             align-items: center;
             gap: 6px;
         }
+
         .level-icon {
             width: 16px;
             height: 16px;
             flex-shrink: 0;
         }
+
         .detail-group {
             margin-bottom: 15px;
         }
+
         .detail-label {
             font-weight: bold;
             color: var(--text-secondary-color);
             margin: 0 0 5px 0;
         }
+
         .detail-content {
             white-space: pre-wrap;
             word-wrap: break-word;
@@ -243,6 +280,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     </style>
 </head>
+
 <body>
 
     <div class="event-viewer-container">
@@ -267,91 +305,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </div>
     </div>
 
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const leftPane = document.getElementById('left-pane');
-    const logListBody = document.getElementById('log-list-body');
-    const logDetailsPane = document.getElementById('log-details-pane');
-    const splitter = document.getElementById('splitter');
-    const logListContainer = document.getElementById('log-list-container');
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const leftPane = document.getElementById('left-pane');
+            const logListBody = document.getElementById('log-list-body');
+            const logDetailsPane = document.getElementById('log-details-pane');
+            const splitter = document.getElementById('splitter');
+            const logListContainer = document.getElementById('log-list-container');
 
-    const ICONS = {
-        ERROR: `<svg class="level-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#d93025"/><path d="M5 5l6 6M11 5l-6 6" stroke="#fff" stroke-width="1.5"/></svg>`,
-        WARNING: `<svg class="level-icon" viewBox="0 0 16 16"><path d="M8 1.5L1 14.5h14L8 1.5z" fill="#fbbc04"/><path d="M8 6v4" stroke="#000" stroke-width="1.5"/><circle cx="8" cy="12" r="0.75" fill="#000"/></svg>`,
-        INFO: `<svg class="level-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#4285f4"/><text x="8" y="11.5" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold">i</text></svg>`,
-        LOG: `<svg class="tree-item-icon" viewBox="0 0 16 16"><path fill="#808080" d="M3 1h10v1H3zM3 3h10v1H3zM3 5h10v1H3zM3 7h10v1H3zM3 9h10v1H3zM3 11h6v1H3z"/></svg>`,
-    };
-    
-    const apiCall = async (action, body) => {
-        const formData = new FormData();
-        formData.append('action', action);
-        if (body) {
-            for (const key in body) {
-                formData.append(key, body[key]);
-            }
-        }
-        try {
-            const response = await fetch('', { method: 'POST', body: formData });
-            if (!response.ok) throw new Error(`サーバーからの応答が不正です: ${response.status}`);
-            return await response.json();
-        } catch (error) {
-            console.error('API Error:', error);
-            logDetailsPane.innerHTML = `<p class="detail-label" style="color:#d93025;">エラー</p><div class="detail-content">${escapeHtml(error.message)}</div>`;
-            return { success: false };
-        }
-    };
+            const ICONS = {
+                ERROR: `<svg class="level-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#d93025"/><path d="M5 5l6 6M11 5l-6 6" stroke="#fff" stroke-width="1.5"/></svg>`,
+                WARNING: `<svg class="level-icon" viewBox="0 0 16 16"><path d="M8 1.5L1 14.5h14L8 1.5z" fill="#fbbc04"/><path d="M8 6v4" stroke="#000" stroke-width="1.5"/><circle cx="8" cy="12" r="0.75" fill="#000"/></svg>`,
+                INFO: `<svg class="level-icon" viewBox="0 0 16 16"><circle cx="8" cy="8" r="7" fill="#4285f4"/><text x="8" y="11.5" font-size="10" fill="#fff" text-anchor="middle" font-weight="bold">i</text></svg>`,
+                LOG: `<svg class="tree-item-icon" viewBox="0 0 16 16"><path fill="#808080" d="M3 1h10v1H3zM3 3h10v1H3zM3 5h10v1H3zM3 7h10v1H3zM3 9h10v1H3zM3 11h6v1H3z"/></svg>`,
+            };
 
-    const renderLogTypes = (logTypes) => {
-        leftPane.innerHTML = '';
-        if (logTypes.length === 0) {
-            leftPane.innerHTML = '<div style="padding:10px; color:#666;">利用可能なログファイルがありません。</div>';
-            return;
-        }
-        logTypes.forEach(type => {
-            const item = document.createElement('div');
-            item.className = 'tree-item';
-            item.innerHTML = `${ICONS.LOG} <span>${type.charAt(0).toUpperCase() + type.slice(1)}</span>`;
-            item.dataset.logType = type;
-            item.addEventListener('click', () => {
-                document.querySelectorAll('.tree-item.active').forEach(i => i.classList.remove('active'));
-                item.classList.add('active');
-                fetchAndRenderLogs(type);
-            });
-            leftPane.appendChild(item);
-        });
-        if (logTypes.length > 0) {
-            leftPane.firstChild.click();
-        }
-    };
+            const apiCall = async (action, body) => {
+                const formData = new FormData();
+                formData.append('action', action);
+                if (body) {
+                    for (const key in body) {
+                        formData.append(key, body[key]);
+                    }
+                }
+                try {
+                    const response = await fetch('', {
+                        method: 'POST',
+                        body: formData
+                    });
+                    if (!response.ok) throw new Error(`サーバーからの応答が不正です: ${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    console.error('API Error:', error);
+                    logDetailsPane.innerHTML = `<p class="detail-label" style="color:#d93025;">エラー</p><div class="detail-content">${escapeHtml(error.message)}</div>`;
+                    return {
+                        success: false
+                    };
+                }
+            };
 
-    const renderLogs = (logs) => {
-        logListBody.innerHTML = '';
-        logDetailsPane.innerHTML = '<div style="padding:10px; color:#666;">ログエントリを選択して詳細を表示します。</div>';
-        if (!logs || logs.length === 0) {
-             logListBody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 20px; color:#666;">このログにはエントリがありません。</td></tr>';
-             return;
-        }
+            const renderLogTypes = (logTypes) => {
+                leftPane.innerHTML = '';
+                if (logTypes.length === 0) {
+                    leftPane.innerHTML = '<div style="padding:10px; color:#666;">利用可能なログファイルがありません。</div>';
+                    return;
+                }
+                logTypes.forEach(type => {
+                    const item = document.createElement('div');
+                    item.className = 'tree-item';
+                    item.innerHTML = `${ICONS.LOG} <span>${type.charAt(0).toUpperCase() + type.slice(1)}</span>`;
+                    item.dataset.logType = type;
+                    item.addEventListener('click', () => {
+                        document.querySelectorAll('.tree-item.active').forEach(i => i.classList.remove('active'));
+                        item.classList.add('active');
+                        fetchAndRenderLogs(type);
+                    });
+                    leftPane.appendChild(item);
+                });
+                if (logTypes.length > 0) {
+                    leftPane.firstChild.click();
+                }
+            };
 
-        logs.forEach((log) => {
-            const row = document.createElement('tr');
-            
-            row.innerHTML = `
+            const renderLogs = (logs) => {
+                logListBody.innerHTML = '';
+                logDetailsPane.innerHTML = '<div style="padding:10px; color:#666;">ログエントリを選択して詳細を表示します。</div>';
+                if (!logs || logs.length === 0) {
+                    logListBody.innerHTML = '<tr><td colspan="3" style="text-align:center; padding: 20px; color:#666;">このログにはエントリがありません。</td></tr>';
+                    return;
+                }
+
+                logs.forEach((log) => {
+                    const row = document.createElement('tr');
+
+                    row.innerHTML = `
                 <td><div class="level-cell">${ICONS[log.level] || ICONS.INFO} ${escapeHtml(log.level)}</div></td>
                 <td>${escapeHtml(log.timestamp)}</td>
                 <td>${escapeHtml(log.message)}</td>
             `;
 
-            row.addEventListener('click', () => {
-                document.querySelectorAll('.log-table tr.selected').forEach(r => r.classList.remove('selected'));
-                row.classList.add('selected');
-                renderLogDetails(log);
-            });
-            logListBody.appendChild(row);
-        });
-    };
+                    row.addEventListener('click', () => {
+                        document.querySelectorAll('.log-table tr.selected').forEach(r => r.classList.remove('selected'));
+                        row.classList.add('selected');
+                        renderLogDetails(log);
+                    });
+                    logListBody.appendChild(row);
+                });
+            };
 
-    const renderLogDetails = (log) => {
-        logDetailsPane.innerHTML = `
+            const renderLogDetails = (log) => {
+                logDetailsPane.innerHTML = `
             <div class="detail-group">
                 <p class="detail-label">メッセージ:</p>
                 <div class="detail-content">${escapeHtml(log.message)}</div>
@@ -369,76 +412,109 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="detail-content">${escapeHtml(JSON.stringify(log.details, null, 2))}</div>
             </div>
         `;
-    };
+            };
 
-    const fetchAndRenderLogs = async (logType) => {
-        const response = await apiCall('get_logs', { type: logType });
-        if (response.success) {
-            renderLogs(response.logs);
-        }
-    };
+            const fetchAndRenderLogs = async (logType) => {
+                const response = await apiCall('get_logs', {
+                    type: logType
+                });
+                if (response.success) {
+                    renderLogs(response.logs);
+                }
+            };
 
-    const initialize = async () => {
-        try {
-            window.parent.postMessage({ type: 'setWindowStyle', style: 'light' }, '*');
-        } catch(e) {
-            console.warn("Could not post message to parent window to set style.");
-        }
-        const response = await apiCall('get_log_types');
-        if (response.success) {
-            renderLogTypes(response.log_types);
-        }
-    };
+            const initialize = async () => {
+                try {
+                    window.parent.postMessage({
+                        type: 'setWindowStyle',
+                        style: 'light'
+                    }, '*');
+                } catch (e) {
+                    console.warn("Could not post message to parent window to set style.");
+                }
+                const response = await apiCall('get_log_types');
+                if (response.success) {
+                    renderLogTypes(response.log_types);
+                }
+            };
 
-    const escapeHtml = (unsafe) => {
-        if (typeof unsafe !== 'string') {
-            if (unsafe === null || unsafe === undefined) return '';
-            try {
-                return String(unsafe);
-            } catch(e) {
-                return '';
+            const escapeHtml = (unsafe) => {
+                if (typeof unsafe !== 'string') {
+                    if (unsafe === null || unsafe === undefined) return '';
+                    try {
+                        return String(unsafe);
+                    } catch (e) {
+                        return '';
+                    }
+                }
+                return unsafe
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            };
+
+            splitter.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const startY = e.clientY;
+                const startHeight = logListContainer.offsetHeight;
+
+                const doDrag = (e) => {
+                    const newHeight = startHeight + (e.clientY - startY);
+                    const parentHeight = logListContainer.parentElement.offsetHeight;
+                    const minHeight = 50;
+                    const maxHeight = parentHeight - 50;
+
+                    if (newHeight > minHeight && newHeight < maxHeight) {
+                        logListContainer.style.height = `${newHeight}px`;
+                    }
+                };
+
+                const stopDrag = () => {
+                    document.removeEventListener('mousemove', doDrag);
+                    document.removeEventListener('mouseup', stopDrag);
+                };
+
+                document.addEventListener('mousemove', doDrag);
+                document.addEventListener('mouseup', stopDrag);
+            });
+
+            initialize();
+
+            const myWindowIdForMessaging = window.name;
+            document.addEventListener('mousedown', () => {
+                window.parent.postMessage({
+                    type: 'iframeClick',
+                    windowId: myWindowIdForMessaging
+                }, '*');
+            }, true);
+        });
+        document.addEventListener('keydown', (e) => {
+            if ((e.altKey && e.key.toLowerCase() === 'w') || (e.altKey && ['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key))) {
+                e.preventDefault();
+                window.parent.postMessage({
+                    type: 'forwardedKeydown',
+                    key: e.key,
+                    altKey: e.altKey,
+                    ctrlKey: e.ctrlKey,
+                    shiftKey: e.shiftKey,
+                    metaKey: e.metaKey,
+                    windowId: myWindowIdForMessaging
+                }, '*');
             }
-        }
-        return unsafe
-             .replace(/&/g, "&amp;")
-             .replace(/</g, "&lt;")
-             .replace(/>/g, "&gt;")
-             .replace(/"/g, "&quot;")
-             .replace(/'/g, "&#039;");
-    };
+        });
 
-    splitter.addEventListener('mousedown', (e) => {
-        e.preventDefault();
-        const startY = e.clientY;
-        const startHeight = logListContainer.offsetHeight;
-        
-        const doDrag = (e) => {
-            const newHeight = startHeight + (e.clientY - startY);
-            const parentHeight = logListContainer.parentElement.offsetHeight;
-            const minHeight = 50;
-            const maxHeight = parentHeight - 50;
-            
-            if (newHeight > minHeight && newHeight < maxHeight) {
-                 logListContainer.style.height = `${newHeight}px`;
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'Alt') {
+                e.preventDefault();
+                window.parent.postMessage({
+                    type: 'forwardedKeyup',
+                    key: e.key
+                }, '*');
             }
-        };
-
-        const stopDrag = () => {
-            document.removeEventListener('mousemove', doDrag);
-            document.removeEventListener('mouseup', stopDrag);
-        };
-        
-        document.addEventListener('mousemove', doDrag);
-        document.addEventListener('mouseup', stopDrag);
-    });
-
-    initialize();
-
-    const myWindowIdForMessaging = window.name;
-    document.addEventListener('mousedown', () => {
-        window.parent.postMessage({ type: 'iframeClick', windowId: myWindowIdForMessaging }, '*');
-    }, true);
-});
-</script>
+        });
+    </script>
 </body>
+
 </html>
