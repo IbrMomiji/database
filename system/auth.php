@@ -204,7 +204,9 @@ class Auth
             $this->pdo->beginTransaction();
 
             $userDir = USER_DIR_PATH . '/' . $uuid;
-            if (is_dir($userDir)) $this->recursiveDelete($userDir);
+            if (is_dir($userDir)) {
+                $this->recursiveDelete($userDir);
+            }
 
             $stmt = $this->pdo->prepare("DELETE FROM users WHERE username = :username");
             $stmt->execute([':username' => $username]);
@@ -218,13 +220,23 @@ class Auth
 
     private function recursiveDelete($dir)
     {
-        if (!is_dir($dir)) return;
-        $files = array_diff(scandir($dir), array('.', '..'));
-        foreach ($files as $file) {
-            $path = "$dir/$file";
-            is_dir($path) ? $this->recursiveDelete($path) : unlink($path);
+        if (!is_dir($dir)) return false;
+        try {
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::CHILD_FIRST
+            );
+            foreach ($iterator as $file) {
+                if ($file->isDir()) {
+                    @rmdir($file->getRealPath());
+                } else {
+                    @unlink($file->getRealPath());
+                }
+            }
+            return @rmdir($dir);
+        } catch (Exception $e) {
+            return false;
         }
-        rmdir($dir);
     }
 
     public function getStorageUsage()

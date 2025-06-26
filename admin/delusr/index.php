@@ -34,13 +34,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['confirm_delete']) && 
         $pdo->beginTransaction();
         try {
            
+            $stmt_uuid = $pdo->prepare("SELECT uuid FROM users WHERE username = ?");
+            $stmt_uuid->execute([$target_user]);
+            $user_uuid = $stmt_uuid->fetchColumn();
+
             $stmt = $pdo->prepare("DELETE FROM users WHERE username = ?");
             $stmt->execute([$target_user]);
 
            
-            $userdir = USER_DIR_PATH . '/' . $target_user;
-            if (file_exists($userdir) && is_dir($userdir)) {
-                deleteDirectoryRecursively($userdir);
+            if ($user_uuid) {
+                $userdir = USER_DIR_PATH . '/' . $user_uuid;
+                if (file_exists($userdir) && is_dir($userdir)) {
+                    deleteDirectoryRecursively($userdir);
+                }
             }
 
             $pdo->commit();
@@ -245,7 +251,6 @@ function deleteDirectoryRecursively($dir) {
     </footer>
 </div>
 
-<!-- 確認モーダル -->
 <div id="confirm-modal" class="modal-overlay">
     <div class="modal-content">
         <p>ユーザー「<span id="user-to-delete"></span>」を本当に削除しますか？<br>この操作は元に戻せません。</p>
