@@ -528,3 +528,22 @@ body {
 .custom-context-menu.light .separator {
     background-color: #cccccc;
 }
+
+.event-viewer-window .title-bar {
+    background-color: var(--titlebar-light);
+    color: var(--text-light);
+    border-bottom: 1px solid #ccc;
+}
+
+.event-viewer-window .window-controls span {
+    color: var(--text-light);
+}
+
+.event-viewer-window .window-controls span:hover {
+    background-color: #e0e0e0;
+}
+
+.event-viewer-window .window-controls span.close-btn:hover {
+    background-color: var(--close-hover);
+    color: white;
+}

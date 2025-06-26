@@ -67,6 +67,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <title>イベント ビューアー</title>
     <style>
+        /* CSSは変更なし */
         :root {
             --font-family: 'Yu Gothic UI', 'Segoe UI', Meiryo, system-ui, sans-serif;
             --bg-color: #ffffff;
@@ -489,30 +490,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     windowId: myWindowIdForMessaging
                 }, '*');
             }, true);
-        });
-        document.addEventListener('keydown', (e) => {
-            if ((e.altKey && e.key.toLowerCase() === 'w') || (e.altKey && ['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key))) {
-                e.preventDefault();
-                window.parent.postMessage({
-                    type: 'forwardedKeydown',
-                    key: e.key,
-                    altKey: e.altKey,
-                    ctrlKey: e.ctrlKey,
-                    shiftKey: e.shiftKey,
-                    metaKey: e.metaKey,
-                    windowId: myWindowIdForMessaging
-                }, '*');
-            }
-        });
+            
+            document.addEventListener('keydown', (e) => {
+                if ((e.altKey && e.key.toLowerCase() === 'w') || (e.altKey && ['ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(e.key))) {
+                    e.preventDefault();
+                    window.parent.postMessage({
+                        type: 'forwardedKeydown',
+                        key: e.key,
+                        altKey: e.altKey,
+                        ctrlKey: e.ctrlKey,
+                        shiftKey: e.shiftKey,
+                        metaKey: e.metaKey,
+                        windowId: myWindowIdForMessaging
+                    }, '*');
+                }
+            });
 
-        document.addEventListener('keyup', (e) => {
-            if (e.key === 'Alt') {
-                e.preventDefault();
-                window.parent.postMessage({
-                    type: 'forwardedKeyup',
-                    key: e.key
-                }, '*');
-            }
+            document.addEventListener('keyup', (e) => {
+                if (e.key === 'Alt') {
+                    e.preventDefault();
+                    window.parent.postMessage({ type: 'forwardedKeyup', key: e.key }, '*');
+                }
+            });
         });
     </script>
 </body>
