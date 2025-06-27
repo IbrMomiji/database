@@ -3,6 +3,6 @@
     "fontSize": 50,
     "fontStyle": "normal",
     "fontWeight": "normal",
-    "wordWrap": true,
+    "wordWrap": false,
     "baseFontSize": 50
 }

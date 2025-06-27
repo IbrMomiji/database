@@ -1,2 +1,0 @@
-passwd ESCが認識される
-explorer ドラッグ不可
